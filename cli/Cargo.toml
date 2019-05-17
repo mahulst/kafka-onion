@@ -1,0 +1,8 @@
+[package]
+name = "cli"
+version = "0.1.0"
+authors = ["mahulst <michel@voorkanter.com>"]
+edition = "2018"
+
+[dependencies]
+read-topic-api = { path = "../read-topic-api" }
