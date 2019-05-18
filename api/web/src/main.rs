@@ -68,13 +68,15 @@ fn fetch_topic_detail_handler(name: web::Path<String>) -> impl Future<Item=HttpR
 }
 
 fn main() -> io::Result<()> {
+    let port = env::var("API_PORT").unwrap_or(String::from("8080"));
+
     env::set_var("RUST_LOG", "actix_web=debug");
     env_logger::init();
-    let sys = actix_rt::System::new("basic-example");
 
+    let sys = actix_rt::System::new("kafka-onion-api");
+    let listen = format!("0.0.0.0:{}", port);
     HttpServer::new(|| {
         App::new()
-            .data(get_client())
             .wrap(middleware::Logger::default())
             .service(favicon)
             .service(web::resource("topics").route(web::get().to_async(fetch_topics_handler)))
@@ -108,9 +110,9 @@ fn main() -> io::Result<()> {
                     ),
             )
     })
-        .bind("127.0.0.1:8080")?
+        .bind(&listen)?
         .start();
 
-    println!("Starting http server: 127.0.0.1:8080");
+    println!("Starting http server: {}", listen);
     sys.run()
 }

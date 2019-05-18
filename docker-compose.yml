@@ -1,10 +1,12 @@
 version: '3.1'
 
 services:
-  api:
+  service:
+    environment:
+      - KAFKA_BROKER_LIST=http://localhost:9090
     build:
-      context: ./api
-      dockerfile: ./docker/Dockerfile
+      context: .
+      dockerfile: ./Dockerfile
     ports:
       - 8080:8080
     expose:

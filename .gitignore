@@ -1,3 +1,18 @@
 /api/target
 **/*.rs.bk
 .idea
+
+# Distribution
+frontend/build/
+
+# elm-package generated files
+frontend/elm-stuff
+
+# elm-repl generated files
+frontend/repl-temp-*
+
+# Dependency directories
+frontend/node_modules
+
+# Desktop Services Store on macOS
+.DS_Store

@@ -5,6 +5,7 @@ use kafka::client::{FetchPartition, FetchOffset, PartitionOffset, fetch};
 use std::collections::HashMap;
 
 pub use kafka::client::KafkaClient;
+use std::env;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PartitionResponse {
@@ -53,10 +54,11 @@ pub struct MessageResponse {
 }
 
 pub fn get_client() -> KafkaClient {
-    //TODO: use env var
-    let broker = "localhost:9092";
+    let broker_list = env::var("KAFKA_BROKER_LIST").unwrap_or(String::from("localhost:9092"));
 
-    let mut client = KafkaClient::new(vec![broker.to_owned()]);
+    let brokers: Vec<String> = broker_list.split(',').map(|s| String::from(s)).collect();
+
+    let mut client = KafkaClient::new(brokers);
 
     client
 }
