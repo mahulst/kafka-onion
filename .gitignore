@@ -1,3 +1,3 @@
-/target
+/api/target
 **/*.rs.bk
 .idea
