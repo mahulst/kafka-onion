@@ -1,58 +1,40 @@
 #[macro_use]
 extern crate serde_derive;
-extern crate actix;
 
-use actix::prelude::*;
+#[macro_use]
+extern crate actix_web;
+
+use std::{env, io};
+
+use actix_files as fs;
+use actix_web::http::{StatusCode};
+
 use actix_web::{
-    http, middleware, server, App, AsyncResponder, FutureResponse, HttpResponse, Path, Error,
-    State, Json
+    error, guard, middleware, web, App, Error, HttpResponse, HttpServer,
+    Result,
 };
-
 use futures::{Future};
+use read_topic_api::{fetch_topics, get_client, fetch_latest_topic_detail, fetch_from_topic_detail, PartitionOffsets};
 
-mod topics_actors;
-
-use topics_actors::{FetchTopics, DbExecutor};
-use read_topic_api::{get_client, PartitionOffsets};
-use crate::topics_actors::{FetchTopicDetail, FetchTopicDetailFrom};
-
-struct AppState {
-    db: Addr<DbExecutor>,
+#[get("/favicon")]
+fn favicon() -> Result<fs::NamedFile> {
+    Ok(fs::NamedFile::open("static/favicon.ico")?)
 }
 
-fn fetch_topics(
-    state: State<AppState>,
-) -> FutureResponse<HttpResponse> {
-    // send async `CreateUser` message to a `DbExecutor`
-    state
-        .db
-        .send(FetchTopics {})
-        .from_err()
-        .and_then(|res| match res {
-            Ok(topics) => {
-                Ok(HttpResponse::Ok().json(topics))
-            },
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
-        .responder()
+fn redirect_to_index() -> Result<fs::NamedFile> {
+    eprintln!("@@");
+    Ok(fs::NamedFile::open("static/index.html")?.set_status_code(StatusCode::OK))
 }
 
-fn fetch_topic_detail(
-    (name, state): (Path<String>, State<AppState>),
-) -> FutureResponse<HttpResponse> {
-    // send async `CreateUser` message to a `DbExecutor`
-    state
-        .db
-        .send(FetchTopicDetail {topic_name: name.into_inner(),})
-        .from_err()
-        .and_then(|res| match res {
-            Ok(topic_detail) => {
+fn fetch_topics_handler() -> impl Future<Item=HttpResponse, Error=Error> {
+    web::block(move || {
+        let mut client = get_client();
 
-                Ok(HttpResponse::Ok().json(topic_detail))
-            },
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
-        .responder()
+        fetch_topics(&mut client)
+    }).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,48 +43,74 @@ struct PartitionFromRequest {
     partition_offsets: PartitionOffsets
 }
 
-fn fetch_from_topic_detail((item, state): (Json<PartitionFromRequest>, State<AppState>)) -> impl Future<Item = HttpResponse, Error = Error> {
-    let item = item.into_inner();
-    let message = FetchTopicDetailFrom {
-        partition_offsets: item.partition_offsets,
-        topic_name: item.topic_name,
-    };
+fn fetch_topic_detail_from_handler(
+    item: web::Json<PartitionFromRequest>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || {
+        let mut client = get_client();
 
-    state.db
-        .send(message)
-        .from_err()
-        .and_then(|res| match res {
-            Ok(topic_detail) => {
-                Ok(HttpResponse::Ok().json(topic_detail))
-            },
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+        fetch_from_topic_detail(&mut client, &item.topic_name, &item.partition_offsets)
+    }).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
-fn main() {
-    ::std::env::set_var("RUST_LOG", "actix_web=info");
+fn fetch_topic_detail_handler(name: web::Path<String>) -> impl Future<Item=HttpResponse, Error=Error> {
+    web::block(move || {
+        let mut client = get_client();
+
+        fetch_latest_topic_detail(&mut client, &name)
+    }).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
+}
+
+fn main() -> io::Result<()> {
+    env::set_var("RUST_LOG", "actix_web=debug");
     env_logger::init();
-    let sys = actix::System::new("Kafka API");
+    let sys = actix_rt::System::new("basic-example");
 
-    let addr = SyncArbiter::start(3, move || DbExecutor(get_client()));
-
-    // Start http server
-    server::new(move || {
-        App::with_state(AppState{db: addr.clone()})
-            // enable logger
-            .middleware(middleware::Logger::default())
-            .resource("/topics", |r| r.method(http::Method::GET).with(fetch_topics))
-            .resource("/topic/{name}", |r| r.method(http::Method::GET).with(fetch_topic_detail))
-            .resource("/topic/{name}/from", |r| {
-                r.method(http::Method::GET)
-                    .with_async_config(fetch_from_topic_detail, |(json_cfg, )| {
-                        json_cfg.0.limit(4096); // <- limit size of the payload
-                    })
-            })
-    }).bind("0.0.0.0:8080")
-        .unwrap()
+    HttpServer::new(|| {
+        App::new()
+            .data(get_client())
+            .wrap(middleware::Logger::default())
+            .service(favicon)
+            .service(web::resource("topics").route(web::get().to_async(fetch_topics_handler)))
+            .service(web::resource("topic/{topic_name}").route(web::get().to_async(fetch_topic_detail_handler)))
+            .service(
+                web::resource("topic/{topic_name}/from")
+                    .data(
+                        web::JsonConfig::default()
+                            .limit(4096) // <- limit size of the payload
+                            .error_handler(|err, _| {
+                                // <- create custom error response
+                                error::InternalError::from_response(
+                                    err,
+                                    HttpResponse::Conflict().finish(),
+                                )
+                                    .into()
+                            }),
+                    )
+                    .route(web::get().to_async(fetch_topic_detail_from_handler)),
+            )
+            // static files
+            .service(fs::Files::new("/", "static").show_files_listing())
+            // default
+            .default_service(
+                web::resource("")
+                    .route(web::get().to(redirect_to_index))
+                    .route(
+                        web::route()
+                            .guard(guard::Not(guard::Get()))
+                            .to(|| HttpResponse::MethodNotAllowed()),
+                    ),
+            )
+    })
+        .bind("127.0.0.1:8080")?
         .start();
 
-    println!("Started http server: 0.0.0.0:8080");
-    let _ = sys.run();
+    println!("Starting http server: 127.0.0.1:8080");
+    sys.run()
 }
