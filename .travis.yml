@@ -1,0 +1,13 @@
+sudo: 'required'
+
+services:
+  - 'docker'
+
+script:
+  - 'docker build -t mahulst/kafka-ui .'
+
+after_success:
+  - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD ; docker push mahulst/kafka-ui;
+
+notifications:
+  email: false
