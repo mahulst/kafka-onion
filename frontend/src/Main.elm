@@ -2,10 +2,12 @@ module Main exposing (Model, Msg(..), Page(..), init, main, update, view)
 
 import Browser
 import Browser.Navigation exposing (Key)
+import Dict exposing (Dict)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Http
 import Json.Decode as D
+import Json.Decode.Extra as DExtra
 import RemoteData exposing (RemoteData(..))
 import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser, oneOf, s)
@@ -37,6 +39,21 @@ type alias Topic =
     }
 
 
+type alias TopicDetail =
+    { name : String
+    , partitionOffsets : Dict Int Int
+    , messageCount : Int
+    , messages : List TopicMessage
+    }
+
+
+type alias TopicMessage =
+    { partition : Int
+    , offset : Int
+    , json : String
+    }
+
+
 type alias Model =
     { apiUrl : String
     , page : Page
@@ -50,7 +67,7 @@ type alias Flags =
 
 type Page
     = TopicOverview (RemoteData Http.Error (List Topic))
-    | TopicDetail Topic
+    | TopicDetailPage (RemoteData Http.Error TopicDetail)
     | PageNone
 
 
@@ -78,6 +95,14 @@ fetchTopics apiUrl =
         }
 
 
+fetchTopicDetail : String -> String -> Cmd Msg
+fetchTopicDetail apiUrl topicName =
+    Http.get
+        { url = apiUrl ++ "/api/topic/" ++ topicName
+        , expect = Http.expectJson (RemoteData.fromResult >> TopicDetailResponse) decodeTopicDetail
+        }
+
+
 decodeTopic : D.Decoder Topic
 decodeTopic =
     D.map2 Topic
@@ -88,6 +113,23 @@ decodeTopic =
 decodeTopics : D.Decoder (List Topic)
 decodeTopics =
     D.list decodeTopic
+
+
+decodeTopicDetail : D.Decoder TopicDetail
+decodeTopicDetail =
+    D.map4 TopicDetail
+        (D.field "name" D.string)
+        (D.field "partition_offsets" (DExtra.dict2 D.int D.int))
+        (D.field "message_count" D.int)
+        (D.field "messages" (D.list decodeTopicMessage))
+
+
+decodeTopicMessage : D.Decoder TopicMessage
+decodeTopicMessage =
+    D.map3 TopicMessage
+        (D.field "partition" D.int)
+        (D.field "offset" D.int)
+        (D.field "json" D.string)
 
 
 routeParser : Parser (Route -> a) a
@@ -121,7 +163,7 @@ getPage apiUrl route =
             ( TopicOverview Loading, fetchTopics apiUrl )
 
         ViewTopicRoute name ->
-            ( TopicDetail { name = name, partitionCount = 1 }, Cmd.none )
+            ( TopicDetailPage Loading, fetchTopicDetail apiUrl name )
 
 
 init : Flags -> Url -> Key -> ( Model, Cmd Msg )
@@ -137,6 +179,7 @@ type Msg
     = OnUrlRequest Browser.UrlRequest
     | OnUrlChange Url
     | TopicsResponse (RemoteData Http.Error (List Topic))
+    | TopicDetailResponse (RemoteData Http.Error TopicDetail)
     | Noop
 
 
@@ -179,6 +222,20 @@ update msg model =
             , Cmd.none
             )
 
+        TopicDetailResponse response ->
+            let
+                newPage =
+                    case model.page of
+                        TopicDetailPage _ ->
+                            TopicDetailPage response
+
+                        _ ->
+                            model.page
+            in
+            ( { model | page = newPage }
+            , Cmd.none
+            )
+
 
 
 ---- VIEW ----
@@ -189,8 +246,8 @@ view model =
     { title = "Kafka UI"
     , body =
         case model.page of
-            TopicDetail topic ->
-                [ div [] [ text "Topic detail placeholder" ] ]
+            TopicDetailPage topic ->
+                [ viewTopicDetail topic ]
 
             TopicOverview topics ->
                 [ viewTopics topics ]
@@ -200,10 +257,50 @@ view model =
     }
 
 
+viewTopicDetail : RemoteData Http.Error TopicDetail -> Html Msg
+viewTopicDetail topicDetailResponse =
+    case topicDetailResponse of
+        NotAsked ->
+            div [] [ text "Should not be here!" ]
+
+        Success topicDetail ->
+            div []
+                [ h1 [] [ text topicDetail.name ]
+                , table []
+                    ([ thead []
+                        [ td [] [ text "partition" ]
+                        , td [] [ text "offset" ]
+                        , td [] [ text "message" ]
+                        ]
+                     ]
+                        ++ List.map viewMessage topicDetail.messages
+                    )
+                ]
+
+        Failure error ->
+            div [] [ text "Something went wrong while fetching topic" ]
+
+        Loading ->
+            div [] [ text "Loading topic, please hold on..." ]
+
+
+viewMessage : TopicMessage -> Html Msg
+viewMessage message =
+    tr []
+        [ td [] [ text (String.fromInt message.partition) ]
+        , td [] [ text (String.fromInt message.offset) ]
+        , td [] [ text message.json ]
+        ]
+
+
 viewTopicListItem : Topic -> Html Msg
 viewTopicListItem topic =
+    let
+        linkText =
+            topic.name ++ " (" ++ String.fromInt topic.partitionCount ++ " partitions)"
+    in
     div []
-        [ text topic.name, text ("(" ++ String.fromInt topic.partitionCount ++ " partitions)") ]
+        [ Html.a [ class "nav-link", href (getPath (ViewTopicRoute topic.name)) ] [ text linkText ] ]
 
 
 viewTopics : RemoteData Http.Error (List Topic) -> Html Msg

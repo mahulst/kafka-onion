@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 pub use kafka::client::KafkaClient;
 use std::env;
+use std::cmp::{max};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PartitionResponse {
@@ -75,7 +76,7 @@ pub fn fetch_topics(client: &mut KafkaClient) -> Result<Vec<TopicResponse>, &'st
 
 pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from: &PartitionOffsets) -> Result<TopicDetailResponse, &'static str> {
     let reqs: Vec<FetchPartition> = from.iter().map(|(partition, offset)| {
-        FetchPartition::new(topic_name, *partition, offset - 10)
+        FetchPartition::new(topic_name, *partition, max(offset - 10, 0))
     }).collect();
     client.load_metadata_all();
 
