@@ -57,7 +57,7 @@ pub fn get_client() -> KafkaClient {
     let broker_list = env::var("KAFKA_BROKER_LIST").unwrap_or(String::from("localhost:9092"));
 
     let brokers: Vec<String> = broker_list.split(',').map(|s| String::from(s)).collect();
-
+    eprintln!("brokers = {:?}", brokers);
     let mut client = KafkaClient::new(brokers);
 
     client

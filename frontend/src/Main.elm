@@ -1,16 +1,46 @@
-module Main exposing (Flags, Model, Msg(..), init, main, update, view)
+module Main exposing (Model, Msg(..), Page(..), init, main, update, view)
 
 import Browser
-import Html exposing (Html, div, h1, img, text)
-import Html.Attributes exposing (src)
+import Browser.Navigation exposing (Key)
+import Html exposing (..)
+import Html.Attributes exposing (..)
+import Http
+import Json.Decode as D
+import RemoteData exposing (RemoteData(..))
+import Url exposing (Url)
+import Url.Parser as Parser exposing ((</>), Parser, oneOf, s)
 
 
 
----- MODEL ----
+-- MAIN
+
+
+main : Program Flags Model Msg
+main =
+    Browser.application
+        { view = view
+        , init = init
+        , onUrlChange = OnUrlChange
+        , onUrlRequest = OnUrlRequest
+        , update = update
+        , subscriptions = always Sub.none
+        }
+
+
+
+-- MODEL
+
+
+type alias Topic =
+    { name : String
+    , partitionCount : Int
+    }
 
 
 type alias Model =
     { apiUrl : String
+    , page : Page
+    , key : Key
     }
 
 
@@ -18,46 +48,176 @@ type alias Flags =
     { apiUrl : String }
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
-    ( { apiUrl = flags.apiUrl }, Cmd.none )
+type Page
+    = TopicOverview (RemoteData Http.Error (List Topic))
+    | TopicDetail Topic
+    | PageNone
 
 
+type Route
+    = TopicsRoute
+    | ViewTopicRoute String
+    | NotFound
 
----- UPDATE ----
+
+parseUrl : Url -> Route
+parseUrl url =
+    case Parser.parse routeParser url of
+        Just route ->
+            route
+
+        Nothing ->
+            NotFound
+
+
+fetchTopics : String -> Cmd Msg
+fetchTopics apiUrl =
+    Http.get
+        { url = apiUrl ++ "/api/topics"
+        , expect = Http.expectJson (RemoteData.fromResult >> TopicsResponse) decodeTopics
+        }
+
+
+decodeTopic : D.Decoder Topic
+decodeTopic =
+    D.map2 Topic
+        (D.field "name" D.string)
+        (D.field "partition_count" D.int)
+
+
+decodeTopics : D.Decoder (List Topic)
+decodeTopics =
+    D.list decodeTopic
+
+
+routeParser : Parser (Route -> a) a
+routeParser =
+    oneOf
+        [ Parser.map ViewTopicRoute (s "topic" </> Parser.string)
+        , Parser.map TopicsRoute (s "topics")
+        ]
+
+
+getPath : Route -> String
+getPath route =
+    case route of
+        NotFound ->
+            "/404"
+
+        TopicsRoute ->
+            "/topics"
+
+        ViewTopicRoute name ->
+            "/topic/" ++ name
+
+
+getPage : String -> Route -> ( Page, Cmd Msg )
+getPage apiUrl route =
+    case route of
+        NotFound ->
+            ( PageNone, Cmd.none )
+
+        TopicsRoute ->
+            ( TopicOverview Loading, fetchTopics apiUrl )
+
+        ViewTopicRoute name ->
+            ( TopicDetail { name = name, partitionCount = 1 }, Cmd.none )
+
+
+init : Flags -> Url -> Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        ( page, cmd ) =
+            parseUrl url |> getPage flags.apiUrl
+    in
+    ( { apiUrl = flags.apiUrl, page = page, key = key }, cmd )
 
 
 type Msg
-    = NoOp
+    = OnUrlRequest Browser.UrlRequest
+    | OnUrlChange Url
+    | TopicsResponse (RemoteData Http.Error (List Topic))
+    | Noop
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    ( model, Cmd.none )
+    case msg of
+        OnUrlChange url ->
+            let
+                ( newPage, cmd ) =
+                    parseUrl url |> getPage model.apiUrl
+            in
+            ( { model | page = newPage }, cmd )
+
+        Noop ->
+            ( model, Cmd.none )
+
+        OnUrlRequest urlRequest ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model
+                    , Browser.Navigation.pushUrl model.key (Url.toString url)
+                    )
+
+                Browser.External url ->
+                    ( model
+                    , Browser.Navigation.load url
+                    )
+
+        TopicsResponse response ->
+            let
+                newPage =
+                    case model.page of
+                        TopicOverview _ ->
+                            TopicOverview response
+
+                        _ ->
+                            model.page
+            in
+            ( { model | page = newPage }
+            , Cmd.none
+            )
 
 
 
 ---- VIEW ----
 
 
-view : Model -> Html Msg
+view : Model -> Browser.Document Msg
 view model =
+    { title = "Kafka UI"
+    , body =
+        case model.page of
+            TopicDetail topic ->
+                [ div [] [ text "Topic detail placeholder" ] ]
+
+            TopicOverview topics ->
+                [ viewTopics topics ]
+
+            PageNone ->
+                [ div [] [ text "Can not find page" ] ]
+    }
+
+
+viewTopicListItem : Topic -> Html Msg
+viewTopicListItem topic =
     div []
-        [ img [ src "/logo.svg" ] []
-        , h1 [] [ text "Your Elm App is working!" ]
-        , text model.apiUrl
-        ]
+        [ text topic.name, text ("(" ++ String.fromInt topic.partitionCount ++ " partitions)") ]
 
 
+viewTopics : RemoteData Http.Error (List Topic) -> Html Msg
+viewTopics topicsResponse =
+    case topicsResponse of
+        NotAsked ->
+            div [] [ text "Should not be here!" ]
 
----- PROGRAM ----
+        Success topics ->
+            div []
+                (List.map viewTopicListItem topics)
 
+        Failure error ->
+            div [] [ text "Something went wrong while fetching topics" ]
 
-main : Program Flags Model Msg
-main =
-    Browser.element
-        { view = view
-        , init = init
-        , update = update
-        , subscriptions = always Sub.none
-        }
+        Loading ->
+            div [] [ text "Loading topics, please hold on..." ]

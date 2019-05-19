@@ -27,7 +27,7 @@ WORKDIR /usr/src/kafka-onion-api/
 COPY api ./api
 
 WORKDIR /usr/src/kafka-onion-api/api
-RUN cargo build --bin --release web
+RUN cargo build --bin web
 
 # ------------------------------------------------------------------------------
 # Final Stage
@@ -41,7 +41,7 @@ RUN adduser --ingroup kafka-onion-api kafka-onion-api
 
 WORKDIR /home/kafka-onion-api/bin/
 
-COPY --from=cargo-build /usr/src/kafka-onion-api/api/target/release/web .
+COPY --from=cargo-build /usr/src/kafka-onion-api/api/target/debug/web .
 
 RUN mkdir static
 COPY --from=cargo-build /usr/src/kafka-onion-api/frontend/build ./static
