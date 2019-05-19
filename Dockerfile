@@ -4,11 +4,17 @@
 # https://github.com/rust-lang/cargo/issues/2644
 # ------------------------------------------------------------------------------
 
-FROM rust:latest as cargo-build
+ARG BASE_IMAGE=ekidd/rust-musl-builder:latest
 
-RUN apt-get update
+# Our first FROM statement declares the build environment.
+FROM ${BASE_IMAGE} AS builder
+
+USER root
 RUN curl -sL https://deb.nodesource.com/setup_10.x | bash -
-RUN apt-get install -y nodejs
+RUN apt-get -y install nodejs
+
+ENV OPENSSL_DIR /usr/local/
+ENV OPENSSL_STATIC=1
 
 WORKDIR /usr/src/kafka-onion-api
 RUN mkdir frontend
@@ -26,25 +32,34 @@ RUN npm run build
 WORKDIR /usr/src/kafka-onion-api/
 COPY api ./api
 
+# Fix permissions on source code.
+RUN sudo chown -R rust:rust ./api
+
+USER rust
+RUN rustup target add x86_64-unknown-linux-musl
+
 WORKDIR /usr/src/kafka-onion-api/api
-RUN cargo build --bin web
+ENV PKG_CONFIG_ALLOW_CROSS=1
+RUN cargo build --target x86_64-unknown-linux-musl --release --bin web
 
 # ------------------------------------------------------------------------------
 # Final Stage
 # ------------------------------------------------------------------------------
 
-FROM rust:slim-stretch
+FROM alpine:3.8
+RUN apk --no-cache add ca-certificates
 
-RUN addgroup kafka-onion-api
 
-RUN adduser --ingroup kafka-onion-api kafka-onion-api
+RUN addgroup -g 1000 kafka-onion-api
+
+RUN adduser -D -s /bin/sh -u 1000 -G kafka-onion-api kafka-onion-api
 
 WORKDIR /home/kafka-onion-api/bin/
 
-COPY --from=cargo-build /usr/src/kafka-onion-api/api/target/debug/web .
+COPY --from=builder /usr/src/kafka-onion-api/api/target/x86_64-unknown-linux-musl/release/web .
 
 RUN mkdir static
-COPY --from=cargo-build /usr/src/kafka-onion-api/frontend/build ./static
+COPY --from=builder /usr/src/kafka-onion-api/frontend/build ./static
 
 RUN chown kafka-onion-api:kafka-onion-api web
 
