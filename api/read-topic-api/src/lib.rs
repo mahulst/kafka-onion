@@ -41,7 +41,7 @@ pub struct TopicDetailResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PartitionDetailResponse {
     id: u32,
-    from_offset: i64,
+    highwatermark_offset: i64,
     message_count: u32,
     messages: Vec<MessageResponse>,
 }
@@ -72,9 +72,11 @@ pub fn fetch_topics(client: &mut KafkaClient) -> Result<Vec<TopicResponse>, &'st
     Ok(topics)
 }
 
+const MAX_BYTES_MESSAGES: i32 = 2_000_000;
+
 pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from: &PartitionOffsets) -> Result<TopicDetailResponse, &'static str> {
     let reqs: Vec<FetchPartition> = from.iter().map(|(partition, offset)| {
-        FetchPartition::new(topic_name, *partition, max(offset - 10, 0))
+        FetchPartition::new(topic_name, *partition, max(offset - 10, 0)).with_max_bytes( MAX_BYTES_MESSAGES / from.len() as i32)
     }).collect();
     client.load_metadata_all();
 
@@ -87,12 +89,20 @@ pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from:
                 let mut messages: Vec<MessageResponse> = vec![];
                 let mut message_count = 0;
 
+                let mut highwatermark_offset = -1;
+
                 let mut messages = match partition.data() {
                     &Ok(ref data) => {
+                        highwatermark_offset = data.highwatermark_offset();
+
                         data.messages().iter().fold(messages, |mut acc, message: &fetch::Message| {
+                            if acc.len() == 10 {
+                                return acc;
+                            }
+
                             // Store lowest offset
                             let offset = partition_offsets.entry(partition.partition()).or_insert(message.offset);
-                            if message.offset > *offset {
+                            if message.offset < *offset {
                                 *offset = message.offset;
                             }
 
@@ -109,9 +119,10 @@ pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from:
                     _ => { messages }
                 };
 
+
                 acc.push(PartitionDetailResponse {
                     id: partition.partition() as u32,
-                    from_offset: 0,
+                    highwatermark_offset,
                     message_count,
                     messages
                 });

@@ -48,7 +48,7 @@ type alias TopicDetail =
 
 type alias PartitionDetail =
     { id : Int
-    , fromOffset : Int
+    , highwatermarkOffset : Int
     , messageCount : Int
     , messages : List TopicMessage
     }
@@ -147,7 +147,7 @@ decodePartitionDetail : D.Decoder PartitionDetail
 decodePartitionDetail =
     D.map4 PartitionDetail
         (D.field "id" D.int)
-        (D.field "from_offset" D.int)
+        (D.field "highwatermark_offset" D.int)
         (D.field "message_count" D.int)
         (D.field "messages" (D.list decodeTopicMessage))
 
