@@ -35,8 +35,7 @@ pub type PartitionOffsets = HashMap<i32, i64>;
 pub struct TopicDetailResponse {
     name: String,
     partition_offsets:PartitionOffsets,
-    message_count: u32,
-    messages: Vec<MessageResponse>,
+    partition_details: Vec<PartitionDetailResponse>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,7 +57,6 @@ pub fn get_client() -> KafkaClient {
     let broker_list = env::var("KAFKA_BROKER_LIST").unwrap_or(String::from("localhost:9092"));
 
     let brokers: Vec<String> = broker_list.split(',').map(|s| String::from(s)).collect();
-    eprintln!("brokers = {:?}", brokers);
     let mut client = KafkaClient::new(brokers);
 
     client
@@ -81,18 +79,20 @@ pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from:
     client.load_metadata_all();
 
     let response: Vec<fetch::Response> = client.fetch_messages(reqs).map_err(|_| "Error fetching messages")?;
-    let mut messages: Vec<MessageResponse> = vec![];
+    let partition_details: Vec<PartitionDetailResponse> = vec![];
     let mut partition_offsets = HashMap::new();
-    let mut message_count = 0;
-    let mut messages: Vec<MessageResponse> = response.iter().fold(messages, |acc, res: &fetch::Response, | {
+    let partition_details: Vec<PartitionDetailResponse> = response.iter().fold(partition_details, |acc, res: &fetch::Response, | {
         res.topics().iter().fold(acc, |acc, topic: &fetch::Topic| {
-            topic.partitions().iter().fold(acc, |acc, partition: &fetch::Partition| {
-                match partition.data() {
+            topic.partitions().iter().fold(acc, |mut acc, partition: &fetch::Partition| {
+                let mut messages: Vec<MessageResponse> = vec![];
+                let mut message_count = 0;
+
+                let mut messages = match partition.data() {
                     &Ok(ref data) => {
-                        data.messages().iter().fold(acc, |mut acc, message: &fetch::Message| {
+                        data.messages().iter().fold(messages, |mut acc, message: &fetch::Message| {
                             // Store lowest offset
                             let offset = partition_offsets.entry(partition.partition()).or_insert(message.offset);
-                            if message.offset < *offset {
+                            if message.offset > *offset {
                                 *offset = message.offset;
                             }
 
@@ -106,8 +106,17 @@ pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from:
                             acc
                         })
                     }
-                    _ => { acc }
-                }
+                    _ => { messages }
+                };
+
+                acc.push(PartitionDetailResponse {
+                    id: partition.partition() as u32,
+                    from_offset: 0,
+                    message_count,
+                    messages
+                });
+
+                acc
             })
         })
     });
@@ -115,8 +124,7 @@ pub fn fetch_from_topic_detail(client: &mut KafkaClient, topic_name: &str, from:
     Ok(TopicDetailResponse {
         name: String::from(topic_name),
         partition_offsets,
-        message_count,
-        messages,
+        partition_details,
     })
 }
 

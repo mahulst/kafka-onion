@@ -42,6 +42,13 @@ type alias Topic =
 type alias TopicDetail =
     { name : String
     , partitionOffsets : Dict Int Int
+    , partitionDetails : List PartitionDetail
+    }
+
+
+type alias PartitionDetail =
+    { id : Int
+    , fromOffset : Int
     , messageCount : Int
     , messages : List TopicMessage
     }
@@ -117,11 +124,10 @@ decodeTopics =
 
 decodeTopicDetail : D.Decoder TopicDetail
 decodeTopicDetail =
-    D.map4 TopicDetail
+    D.map3 TopicDetail
         (D.field "name" D.string)
         (D.field "partition_offsets" (DExtra.dict2 D.int D.int))
-        (D.field "message_count" D.int)
-        (D.field "messages" (D.list decodeTopicMessage))
+        decodeAndSortPartitionDetailList
 
 
 decodeTopicMessage : D.Decoder TopicMessage
@@ -130,6 +136,20 @@ decodeTopicMessage =
         (D.field "partition" D.int)
         (D.field "offset" D.int)
         (D.field "json" D.string)
+
+
+decodeAndSortPartitionDetailList : D.Decoder (List PartitionDetail)
+decodeAndSortPartitionDetailList =
+    D.map (List.sortBy .id) (D.field "partition_details" (D.list decodePartitionDetail))
+
+
+decodePartitionDetail : D.Decoder PartitionDetail
+decodePartitionDetail =
+    D.map4 PartitionDetail
+        (D.field "id" D.int)
+        (D.field "from_offset" D.int)
+        (D.field "message_count" D.int)
+        (D.field "messages" (D.list decodeTopicMessage))
 
 
 routeParser : Parser (Route -> a) a
@@ -265,23 +285,31 @@ viewTopicDetail topicDetailResponse =
 
         Success topicDetail ->
             div []
-                [ h1 [] [ text topicDetail.name ]
-                , table []
-                    ([ thead []
-                        [ td [] [ text "partition" ]
-                        , td [] [ text "offset" ]
-                        , td [] [ text "message" ]
-                        ]
-                     ]
-                        ++ List.map viewMessage topicDetail.messages
-                    )
-                ]
+                ([ h1 [] [ text topicDetail.name ]
+                 ]
+                    ++ List.map viewPartitionDetail topicDetail.partitionDetails
+                )
 
         Failure error ->
             div [] [ text "Something went wrong while fetching topic" ]
 
         Loading ->
             div [] [ text "Loading topic, please hold on..." ]
+
+
+viewPartitionDetail : PartitionDetail -> Html Msg
+viewPartitionDetail partitionDetail =
+    div []
+        [ table []
+            ([ thead []
+                [ td [] [ text "partition" ]
+                , td [] [ text "offset" ]
+                , td [] [ text "message" ]
+                ]
+             ]
+                ++ List.map viewMessage partitionDetail.messages
+            )
+        ]
 
 
 viewMessage : TopicMessage -> Html Msg
