@@ -9,11 +9,13 @@ use std::{env, io};
 use actix_files as fs;
 use actix_web::http::StatusCode;
 use actix_web::middleware::cors::Cors;
+use actix_web::web::Query;
 use actix_web::{error, guard, middleware, web, App, Error, HttpResponse, HttpServer, Result};
 use futures::Future;
 use read_topic_api::{
     fetch_from_topic_detail, fetch_latest_topic_detail, fetch_topics, get_client, PartitionOffsets,
 };
+use std::collections::HashMap;
 
 #[get("/favicon")]
 fn favicon() -> Result<fs::NamedFile> {
@@ -25,16 +27,16 @@ fn redirect_to_index() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/index.html")?.set_status_code(StatusCode::OK))
 }
 
-fn fetch_topics_handler() -> impl Future<Item=HttpResponse, Error=Error> {
+fn fetch_topics_handler() -> impl Future<Item = HttpResponse, Error = Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_topics(&mut client)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,31 +46,66 @@ struct PartitionFromRequest {
 }
 
 fn fetch_topic_detail_from_handler(
-    item: web::Json<PartitionFromRequest>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
+    topic_name: web::Path<String>,
+    offsets: Query<Offsets>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    
+    // TODO: can actix-web parse lists from query?
+    let partitions: Vec<(i32, i64)> = offsets
+        .offsets
+        .split(',')
+        .map(|el| {
+            let els: Vec<&str> = el.split(';').collect();
+            let partition = els.first().expect("No partition found in offsets");
+            let offset = els.last().expect("No offset found in offsets");
+
+            return (
+                partition
+                    .parse::<i32>()
+                    .expect("Offsets should contain numbers"),
+                offset
+                    .parse::<i64>()
+                    .expect("Offsets should contain numbers"),
+            );
+        })
+        .collect();
+    let mut partition_offsets = HashMap::new();
+    let partition_offsets: HashMap<i32, i64> =
+        partitions
+            .iter()
+            .fold(partition_offsets, |mut acc, (partition, offset)| {
+                acc.insert(*partition, *offset);
+                acc
+            });
+
     web::block(move || {
         let mut client = get_client();
 
-        fetch_from_topic_detail(&mut client, &item.topic_name, &item.partition_offsets)
+        fetch_from_topic_detail(&mut client, &topic_name, &partition_offsets)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
+}
+
+#[derive(Deserialize, Debug)]
+struct Offsets {
+    offsets: String,
 }
 
 fn fetch_topic_detail_handler(
     name: web::Path<String>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
+) -> impl Future<Item = HttpResponse, Error = Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_latest_topic_detail(&mut client, &name)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 fn main() -> io::Result<()> {
@@ -86,7 +123,7 @@ fn main() -> io::Result<()> {
             .wrap(
                 Cors::new()
                     .allowed_origin("http://localhost:3000")
-                    .allowed_methods(vec!["GET", "POST"])
+                    .allowed_methods(vec!["GET", "POST"]),
             )
             .service(favicon)
             .service(web::resource("api/topics").route(web::get().to_async(fetch_topics_handler)))
@@ -96,17 +133,6 @@ fn main() -> io::Result<()> {
             )
             .service(
                 web::resource("api/topic/{topic_name}/from")
-                    .data(
-                        web::JsonConfig::default()
-                            .limit(4096)
-                            .error_handler(|err, _| {
-                                error::InternalError::from_response(
-                                    err,
-                                    HttpResponse::Conflict().finish(),
-                                )
-                                    .into()
-                            }),
-                    )
                     .route(web::get().to_async(fetch_topic_detail_from_handler)),
             )
             // static files
@@ -122,8 +148,8 @@ fn main() -> io::Result<()> {
                     ),
             )
     })
-        .bind(&listen)?
-        .start();
+    .bind(&listen)?
+    .start();
 
     println!("Starting http server: {}", listen);
     sys.run()

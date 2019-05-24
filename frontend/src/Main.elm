@@ -8,9 +8,11 @@ import Html.Attributes exposing (..)
 import Http
 import Json.Decode as D
 import Json.Decode.Extra as DExtra
+import Json.Encode as E
 import RemoteData exposing (RemoteData(..))
 import Url exposing (Url)
-import Url.Parser as Parser exposing ((</>), Parser, oneOf, s)
+import Url.Parser as Parser exposing ((</>), (<?>), Parser, oneOf, s)
+import Url.Parser.Query as Q
 
 
 
@@ -39,9 +41,13 @@ type alias Topic =
     }
 
 
+type alias PartitionOffsets =
+    Dict Int Int
+
+
 type alias TopicDetail =
     { name : String
-    , partitionOffsets : Dict Int Int
+    , partitionOffsets : PartitionOffsets
     , partitionDetails : List PartitionDetail
     }
 
@@ -80,7 +86,7 @@ type Page
 
 type Route
     = TopicsRoute
-    | ViewTopicRoute String
+    | ViewTopicRoute String PartitionOffsets
     | NotFound
 
 
@@ -102,10 +108,45 @@ fetchTopics apiUrl =
         }
 
 
-fetchTopicDetail : String -> String -> Cmd Msg
-fetchTopicDetail apiUrl topicName =
-    Http.get
-        { url = apiUrl ++ "/api/topic/" ++ topicName
+encodePartitionOffsets : PartitionOffsets -> E.Value
+encodePartitionOffsets partitionOffsets =
+    E.dict String.fromInt E.int partitionOffsets
+
+
+-- TODO: Can this be done nicer?
+getTopicDetailPath : String -> String -> PartitionOffsets -> String
+getTopicDetailPath apiUrl topicName partitionOffsets =
+    let
+        baseUrl =
+            apiUrl ++ "/api/topic/" ++ topicName
+    in
+    if Dict.size partitionOffsets == 0 then
+        baseUrl
+
+    else
+        baseUrl
+            ++ "/from?offsets="
+            ++ Dict.foldl
+                (\partition offset acc ->
+                    acc ++ String.fromInt partition ++ ";" ++ String.fromInt offset ++ ","
+                )
+                ""
+                partitionOffsets
+        |> String.dropRight 1
+
+fetchTopicDetail : String -> String -> PartitionOffsets -> Cmd Msg
+fetchTopicDetail apiUrl topicName partitionOffsets =
+    let
+        body =
+            Http.jsonBody (encodePartitionOffsets partitionOffsets)
+    in
+    Http.request
+        { method = "GET"
+        , url = getTopicDetailPath apiUrl topicName partitionOffsets
+        , body = body
+        , tracker = Nothing
+        , timeout = Nothing
+        , headers = []
         , expect = Http.expectJson (RemoteData.fromResult >> TopicDetailResponse) decodeTopicDetail
         }
 
@@ -155,9 +196,37 @@ decodePartitionDetail =
 routeParser : Parser (Route -> a) a
 routeParser =
     oneOf
-        [ Parser.map ViewTopicRoute (s "topic" </> Parser.string)
+        [ Parser.map ViewTopicRoute (s "topic" </> Parser.string <?> partitionOffsetUrlParser)
         , Parser.map TopicsRoute (s "topics")
         ]
+
+
+partitionOffsetUrlParser : Q.Parser PartitionOffsets
+partitionOffsetUrlParser =
+    Q.custom "offsets" listToPartitionOffset
+
+
+listToPartitionOffset : List String -> PartitionOffsets
+listToPartitionOffset list =
+    List.foldl foldOffset
+        Dict.empty
+        list
+
+-- TODO: Can this be done nicer?
+
+foldOffset : String -> PartitionOffsets -> PartitionOffsets
+foldOffset str dict =
+    case String.split ";" str of
+        [ partition, offsets ] ->
+            case ( String.toInt partition, String.toInt offsets ) of
+                ( Just p, Just o ) ->
+                    Dict.insert p o dict
+
+                _ ->
+                    dict
+
+        _ ->
+            dict
 
 
 getPath : Route -> String
@@ -169,8 +238,8 @@ getPath route =
         TopicsRoute ->
             "/topics"
 
-        ViewTopicRoute name ->
-            "/topic/" ++ name
+        ViewTopicRoute name partitionOffsets ->
+            "/topic/" ++ name ++ getTopicOffsetUrl partitionOffsets
 
 
 getPage : String -> Route -> ( Page, Cmd Msg )
@@ -182,8 +251,8 @@ getPage apiUrl route =
         TopicsRoute ->
             ( TopicOverview Loading, fetchTopics apiUrl )
 
-        ViewTopicRoute name ->
-            ( TopicDetailPage Loading, fetchTopicDetail apiUrl name )
+        ViewTopicRoute name partitionOffsets ->
+            ( TopicDetailPage Loading, fetchTopicDetail apiUrl name partitionOffsets )
 
 
 init : Flags -> Url -> Key -> ( Model, Cmd Msg )
@@ -206,15 +275,15 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Noop ->
+            ( model, Cmd.none )
+
         OnUrlChange url ->
             let
                 ( newPage, cmd ) =
                     parseUrl url |> getPage model.apiUrl
             in
             ( { model | page = newPage }, cmd )
-
-        Noop ->
-            ( model, Cmd.none )
 
         OnUrlRequest urlRequest ->
             case urlRequest of
@@ -277,6 +346,14 @@ view model =
     }
 
 
+getTopicOffsetUrl : PartitionOffsets -> String
+getTopicOffsetUrl offsets =
+    Dict.foldl
+        (\a b str -> str ++ "offsets=" ++ String.fromInt a ++ ";" ++ String.fromInt b ++ "&")
+        "?"
+        offsets
+
+
 viewTopicDetail : RemoteData Http.Error TopicDetail -> Html Msg
 viewTopicDetail topicDetailResponse =
     case topicDetailResponse of
@@ -286,6 +363,7 @@ viewTopicDetail topicDetailResponse =
         Success topicDetail ->
             div []
                 ([ h1 [] [ text topicDetail.name ]
+                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)) ] [ text "Next messages" ]
                  ]
                     ++ List.map viewPartitionDetail topicDetail.partitionDetails
                 )
@@ -328,7 +406,7 @@ viewTopicListItem topic =
             topic.name ++ " (" ++ String.fromInt topic.partitionCount ++ " partitions)"
     in
     div []
-        [ Html.a [ class "nav-link", href (getPath (ViewTopicRoute topic.name)) ] [ text linkText ] ]
+        [ Html.a [ class "nav-link", href (getPath (ViewTopicRoute topic.name Dict.empty)) ] [ text linkText ] ]
 
 
 viewTopics : RemoteData Http.Error (List Topic) -> Html Msg
