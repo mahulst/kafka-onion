@@ -23,7 +23,6 @@ fn favicon() -> Result<fs::NamedFile> {
 }
 
 fn redirect_to_index() -> Result<fs::NamedFile> {
-    eprintln!("@@");
     Ok(fs::NamedFile::open("static/index.html")?.set_status_code(StatusCode::OK))
 }
 
@@ -49,7 +48,7 @@ fn fetch_topic_detail_from_handler(
     topic_name: web::Path<String>,
     offsets: Query<Offsets>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-    
+
     // TODO: can actix-web parse lists from query?
     let partitions: Vec<(i32, i64)> = offsets
         .offsets
@@ -136,7 +135,7 @@ fn main() -> io::Result<()> {
                     .route(web::get().to_async(fetch_topic_detail_from_handler)),
             )
             // static files
-            .service(fs::Files::new("/", "static").show_files_listing())
+            .service(fs::Files::new("/", "static").index_file("static/index.html"))
             // default
             .default_service(
                 web::resource("")

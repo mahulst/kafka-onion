@@ -85,7 +85,8 @@ type Page
 
 
 type Route
-    = TopicsRoute
+    = RootRoute
+    | TopicsRoute
     | ViewTopicRoute String PartitionOffsets
     | NotFound
 
@@ -113,7 +114,10 @@ encodePartitionOffsets partitionOffsets =
     E.dict String.fromInt E.int partitionOffsets
 
 
+
 -- TODO: Can this be done nicer?
+
+
 getTopicDetailPath : String -> String -> PartitionOffsets -> String
 getTopicDetailPath apiUrl topicName partitionOffsets =
     let
@@ -132,7 +136,8 @@ getTopicDetailPath apiUrl topicName partitionOffsets =
                 )
                 ""
                 partitionOffsets
-        |> String.dropRight 1
+            |> String.dropRight 1
+
 
 fetchTopicDetail : String -> String -> PartitionOffsets -> Cmd Msg
 fetchTopicDetail apiUrl topicName partitionOffsets =
@@ -196,7 +201,8 @@ decodePartitionDetail =
 routeParser : Parser (Route -> a) a
 routeParser =
     oneOf
-        [ Parser.map ViewTopicRoute (s "topic" </> Parser.string <?> partitionOffsetUrlParser)
+        [ Parser.map RootRoute Parser.top
+        , Parser.map ViewTopicRoute (s "topic" </> Parser.string <?> partitionOffsetUrlParser)
         , Parser.map TopicsRoute (s "topics")
         ]
 
@@ -212,7 +218,10 @@ listToPartitionOffset list =
         Dict.empty
         list
 
+
+
 -- TODO: Can this be done nicer?
+
 
 foldOffset : String -> PartitionOffsets -> PartitionOffsets
 foldOffset str dict =
@@ -238,6 +247,9 @@ getPath route =
         TopicsRoute ->
             "/topics"
 
+        RootRoute ->
+            "/topics"
+
         ViewTopicRoute name partitionOffsets ->
             "/topic/" ++ name ++ getTopicOffsetUrl partitionOffsets
 
@@ -247,6 +259,9 @@ getPage apiUrl route =
     case route of
         NotFound ->
             ( PageNone, Cmd.none )
+
+        RootRoute ->
+            ( TopicOverview Loading, fetchTopics apiUrl )
 
         TopicsRoute ->
             ( TopicOverview Loading, fetchTopics apiUrl )
