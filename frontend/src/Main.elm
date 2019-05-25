@@ -369,6 +369,11 @@ getTopicOffsetUrl offsets =
         offsets
 
 
+addToOffsets : Int -> PartitionOffsets -> PartitionOffsets
+addToOffsets n offsets =
+    Dict.map (\_ offset -> offset + n) offsets
+
+
 viewTopicDetail : RemoteData Http.Error TopicDetail -> Html Msg
 viewTopicDetail topicDetailResponse =
     case topicDetailResponse of
@@ -378,7 +383,8 @@ viewTopicDetail topicDetailResponse =
         Success topicDetail ->
             div []
                 ([ h1 [] [ text topicDetail.name ]
-                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)) ] [ text "Next messages" ]
+                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)) ] [ text "Older" ]
+                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name (addToOffsets 20 topicDetail.partitionOffsets))) ] [ text "Newer" ]
                  ]
                     ++ List.map viewPartitionDetail topicDetail.partitionDetails
                 )
