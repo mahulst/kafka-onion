@@ -13,7 +13,8 @@ use actix_web::web::Query;
 use actix_web::{error, guard, middleware, web, App, Error, HttpResponse, HttpServer, Result};
 use futures::Future;
 use read_topic_api::{
-    fetch_from_topic_detail, fetch_latest_topic_detail, fetch_topics, get_client, PartitionOffsets,
+    fetch_from_topic_detail, fetch_latest_topic_detail, fetch_topics, get_client,
+    send_message_to_topic, PartitionOffsets,
 };
 use std::collections::HashMap;
 
@@ -39,16 +40,15 @@ fn fetch_topics_handler() -> impl Future<Item = HttpResponse, Error = Error> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct PartitionFromRequest {
-    topic_name: String,
-    partition_offsets: PartitionOffsets,
+struct SendMessageRequest {
+    partition: i32,
+    message: String,
 }
 
 fn fetch_topic_detail_from_handler(
     topic_name: web::Path<String>,
     offsets: Query<Offsets>,
 ) -> impl Future<Item = HttpResponse, Error = Error> {
-
     // TODO: can actix-web parse lists from query?
     let partitions: Vec<(i32, i64)> = offsets
         .offsets
@@ -106,6 +106,20 @@ fn fetch_topic_detail_handler(
         Err(_) => Ok(HttpResponse::InternalServerError().into()),
     })
 }
+fn send_message_to_topic_handler(
+    topic_name: web::Path<String>,
+    item: web::Json<SendMessageRequest>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || {
+        let mut client = get_client();
+
+        send_message_to_topic(&mut client, &topic_name, item.partition, &item.message)
+    })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().finish()),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
+}
 
 fn main() -> io::Result<()> {
     let port = env::var("API_PORT").unwrap_or(String::from("8080"));
@@ -133,6 +147,22 @@ fn main() -> io::Result<()> {
             .service(
                 web::resource("api/topic/{topic_name}/from")
                     .route(web::get().to_async(fetch_topic_detail_from_handler)),
+            )
+            .service(
+                web::resource("api/topic/{topic_name}/sendMessage")
+                    .data(
+                        web::JsonConfig::default()
+                            .limit(4096) // <- limit size of the payload
+                            .error_handler(|err, _| {
+                                // <- create custom error response
+                                error::InternalError::from_response(
+                                    err,
+                                    HttpResponse::Conflict().finish(),
+                                )
+                                .into()
+                            }),
+                    )
+                    .route(web::post().to_async(send_message_to_topic_handler)),
             )
             // static files
             .service(fs::Files::new("/", "static").index_file("static/index.html"))

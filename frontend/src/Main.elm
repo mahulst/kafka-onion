@@ -5,6 +5,7 @@ import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
 import Html exposing (..)
 import Html.Attributes exposing (..)
+import Html.Events
 import Http
 import Json.Decode as D
 import Json.Decode.Extra as DExtra
@@ -78,15 +79,24 @@ type alias Flags =
     { apiUrl : String }
 
 
+type alias SendMessagePageModel =
+    { topicDetailResponse : RemoteData Http.Error TopicDetail
+    , partition : Int
+    , message : Maybe String
+    }
+
+
 type Page
     = TopicOverview (RemoteData Http.Error (List Topic))
     | TopicDetailPage (RemoteData Http.Error TopicDetail)
+    | SendMessagePage SendMessagePageModel
     | PageNone
 
 
 type Route
     = RootRoute
     | TopicsRoute
+    | SendMessageRoute String Int
     | ViewTopicRoute String PartitionOffsets
     | NotFound
 
@@ -156,6 +166,34 @@ fetchTopicDetail apiUrl topicName partitionOffsets =
         }
 
 
+encodeSendMessageRequest : Int -> String -> E.Value
+encodeSendMessageRequest partition message =
+    E.object
+        [ ( "message", E.string message )
+        , ( "partition", E.int partition )
+        ]
+
+
+sendMessage : String -> String -> Int -> String -> Cmd Msg
+sendMessage apiUrl topicName partition message =
+    let
+        body =
+            Http.jsonBody (encodeSendMessageRequest partition message)
+
+        url =
+            apiUrl ++ "/api/topic/" ++ topicName ++ "/sendMessage"
+    in
+    Http.request
+        { method = "POST"
+        , url = url
+        , body = body
+        , tracker = Nothing
+        , timeout = Nothing
+        , headers = []
+        , expect = Http.expectWhatever SendMessageResponse
+        }
+
+
 decodeTopic : D.Decoder Topic
 decodeTopic =
     D.map2 Topic
@@ -203,6 +241,7 @@ routeParser =
     oneOf
         [ Parser.map RootRoute Parser.top
         , Parser.map ViewTopicRoute (s "topic" </> Parser.string <?> partitionOffsetUrlParser)
+        , Parser.map SendMessageRoute (s "topic" </> Parser.string </> s "sendMessage" </> Parser.int)
         , Parser.map TopicsRoute (s "topics")
         ]
 
@@ -247,6 +286,9 @@ getPath route =
         TopicsRoute ->
             "/topics"
 
+        SendMessageRoute topicName partition ->
+            "/topic/" ++ topicName ++ "/sendMessage/" ++ String.fromInt partition
+
         RootRoute ->
             "/topics"
 
@@ -254,11 +296,18 @@ getPath route =
             "/topic/" ++ name ++ getTopicOffsetUrl partitionOffsets
 
 
-getPage : String -> Route -> ( Page, Cmd Msg )
-getPage apiUrl route =
+getPage : String -> Maybe String -> Route -> ( Page, Cmd Msg )
+getPage apiUrl maybeMessage route =
     case route of
         NotFound ->
             ( PageNone, Cmd.none )
+
+        SendMessageRoute topicName partition ->
+            let
+                model =
+                    { topicDetailResponse = Loading, partition = partition, message = maybeMessage }
+            in
+            ( SendMessagePage model, fetchTopicDetail apiUrl topicName Dict.empty )
 
         RootRoute ->
             ( TopicOverview Loading, fetchTopics apiUrl )
@@ -274,7 +323,7 @@ init : Flags -> Url -> Key -> ( Model, Cmd Msg )
 init flags url key =
     let
         ( page, cmd ) =
-            parseUrl url |> getPage flags.apiUrl
+            parseUrl url |> getPage flags.apiUrl Nothing
     in
     ( { apiUrl = flags.apiUrl, page = page, key = key }, cmd )
 
@@ -282,6 +331,10 @@ init flags url key =
 type Msg
     = OnUrlRequest Browser.UrlRequest
     | OnUrlChange Url
+    | ChangeSendMessage String
+    | ChangeSendMessagePartition Int
+    | SendMessage String Int String
+    | SendMessageResponse (Result Http.Error ())
     | TopicsResponse (RemoteData Http.Error (List Topic))
     | TopicDetailResponse (RemoteData Http.Error TopicDetail)
     | Noop
@@ -296,7 +349,7 @@ update msg model =
         OnUrlChange url ->
             let
                 ( newPage, cmd ) =
-                    parseUrl url |> getPage model.apiUrl
+                    parseUrl url |> getPage model.apiUrl Nothing
             in
             ( { model | page = newPage }, cmd )
 
@@ -311,6 +364,44 @@ update msg model =
                     ( model
                     , Browser.Navigation.load url
                     )
+
+        SendMessage topicName partition message ->
+            ( model, sendMessage model.apiUrl topicName partition message )
+
+        SendMessageResponse _ ->
+            ( model, Cmd.none )
+
+        ChangeSendMessage message ->
+            let
+                newModel =
+                    case model.page of
+                        SendMessagePage sendMessageModel ->
+                            let
+                                newPageModel =
+                                    { sendMessageModel | message = Just message }
+                            in
+                            { model | page = SendMessagePage newPageModel }
+
+                        _ ->
+                            model
+            in
+            ( newModel, Cmd.none )
+
+        ChangeSendMessagePartition partition ->
+            let
+                newModel =
+                    case model.page of
+                        SendMessagePage sendMessageModel ->
+                            let
+                                newPageModel =
+                                    { sendMessageModel | partition = partition }
+                            in
+                            { model | page = SendMessagePage newPageModel }
+
+                        _ ->
+                            model
+            in
+            ( newModel, Cmd.none )
 
         TopicsResponse response ->
             let
@@ -332,6 +423,9 @@ update msg model =
                     case model.page of
                         TopicDetailPage _ ->
                             TopicDetailPage response
+
+                        SendMessagePage sendMessagePageModel ->
+                            SendMessagePage { sendMessagePageModel | topicDetailResponse = response }
 
                         _ ->
                             model.page
@@ -356,9 +450,53 @@ view model =
             TopicOverview topics ->
                 [ viewTopics topics ]
 
+            SendMessagePage sendMessagePageModel ->
+                [ viewSendMessage sendMessagePageModel ]
+
             PageNone ->
                 [ div [] [ text "Can not find page" ] ]
     }
+
+
+viewSendMessage : SendMessagePageModel -> Html Msg
+viewSendMessage model =
+    case model.topicDetailResponse of
+        NotAsked ->
+            div [] [ text "Should not be here!" ]
+
+        Success topicDetail ->
+            let
+                message =
+                    Maybe.withDefault "" model.message
+            in
+            div []
+                [ h1 [] [ text topicDetail.name ]
+                , Html.a [ href (getPath (ViewTopicRoute topicDetail.name Dict.empty)) ] [ text "Back to detail view" ]
+                , div
+                    []
+                    [ Html.select
+                        [ Html.Events.onInput (\input -> ChangeSendMessagePartition (Maybe.withDefault 0 (String.toInt input)))
+                        ]
+                        (List.map
+                            (\partitionDetail ->
+                                Html.option
+                                    [ Html.Attributes.value (String.fromInt partitionDetail.id)
+                                    , Html.Attributes.selected (model.partition == partitionDetail.id)
+                                    ]
+                                    [ text (String.fromInt partitionDetail.id) ]
+                            )
+                            topicDetail.partitionDetails
+                        )
+                    , Html.textarea [ Html.Attributes.rows 50, Html.Attributes.value message, Html.Events.onInput ChangeSendMessage ] []
+                    , Html.button [ Html.Events.onClick (SendMessage topicDetail.name model.partition (Maybe.withDefault "" model.message)) ] [ text "Send" ]
+                    ]
+                ]
+
+        Failure error ->
+            div [] [ text "Something went wrong while fetching topic" ]
+
+        Loading ->
+            div [] [ text "Loading topic, please hold on..." ]
 
 
 getTopicOffsetUrl : PartitionOffsets -> String
@@ -383,6 +521,7 @@ viewTopicDetail topicDetailResponse =
         Success topicDetail ->
             div []
                 ([ h1 [] [ text topicDetail.name ]
+                 , Html.a [ href (getPath (SendMessageRoute topicDetail.name 0)) ] [ text "Send new message" ]
                  , Html.a [ href (getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)) ] [ text "Older" ]
                  , Html.a [ href (getPath (ViewTopicRoute topicDetail.name (addToOffsets 20 topicDetail.partitionOffsets))) ] [ text "Newer" ]
                  ]

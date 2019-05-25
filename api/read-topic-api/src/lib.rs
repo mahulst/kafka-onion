@@ -1,12 +1,14 @@
 #[macro_use]
 extern crate serde_derive;
 
-use kafka::client::{fetch, FetchOffset, FetchPartition, PartitionOffset};
+use kafka::client::{fetch, FetchOffset, FetchPartition, PartitionOffset, ProduceMessage};
 use std::collections::HashMap;
 
 pub use kafka::client::KafkaClient;
+use kafka::producer::RequiredAcks;
 use std::cmp::max;
 use std::env;
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PartitionResponse {
@@ -164,6 +166,30 @@ pub fn fetch_from_topic_detail(
         partition_offsets,
         partition_details,
     })
+}
+
+pub fn send_message_to_topic(
+    client: &mut KafkaClient,
+    topic_name: &str,
+    partition: i32,
+    message: &str,
+) -> Result<(), &'static str> {
+    client
+        .load_metadata_all()
+        .map_err(|_| "Error loading metadata")?;
+
+    let messages = vec![ProduceMessage::new(
+        topic_name,
+        partition,
+        None,
+        Some(message.as_bytes()),
+    )];
+
+    let resp = client.produce_messages(RequiredAcks::One, Duration::from_millis(100), messages);
+
+    resp.map_err(|_| "Error producing messag")?;
+
+    Ok(())
 }
 
 pub fn fetch_latest_topic_detail(
