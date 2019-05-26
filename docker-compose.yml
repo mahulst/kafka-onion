@@ -1,6 +1,15 @@
 version: '3.1'
 
 services:
+  production-build:
+    image: mahulst/kafka-ui
+    environment:
+      - KAFKA_BROKER_LIST=kafka:29092
+      - API_PORT=8081
+    ports:
+      - 8081:8081
+    expose:
+      - 8081
   service:
     environment:
       - KAFKA_BROKER_LIST=kafka:29092
