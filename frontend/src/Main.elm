@@ -3,6 +3,12 @@ port module Main exposing (Model, Msg(..), Page(..), init, main, update, view)
 import Browser
 import Browser.Navigation exposing (Key)
 import Dict exposing (Dict)
+import Element
+import Element.Background
+import Element.Border
+import Element.Events
+import Element.Font
+import Element.Input
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events
@@ -32,8 +38,9 @@ main =
         }
 
 
-
 port copy : String -> Cmd msg
+
+
 
 -- MODEL
 
@@ -88,9 +95,18 @@ type alias SendMessagePageModel =
     }
 
 
+type alias TopicOverviewPageModel =
+    { topicsResponse : RemoteData Http.Error (List Topic)
+    }
+
+
+type alias TopicDetailPageModel =
+    { topicDetailResponse : RemoteData Http.Error TopicDetail }
+
+
 type Page
-    = TopicOverview (RemoteData Http.Error (List Topic))
-    | TopicDetailPage (RemoteData Http.Error TopicDetail)
+    = TopicOverview TopicOverviewPageModel
+    | TopicDetailPage TopicDetailPageModel
     | SendMessagePage SendMessagePageModel
     | PageNone
 
@@ -312,13 +328,13 @@ getPage apiUrl maybeMessage route =
             ( SendMessagePage model, fetchTopicDetail apiUrl topicName Dict.empty )
 
         RootRoute ->
-            ( TopicOverview Loading, fetchTopics apiUrl )
+            ( TopicOverview { topicsResponse = Loading }, fetchTopics apiUrl )
 
         TopicsRoute ->
-            ( TopicOverview Loading, fetchTopics apiUrl )
+            ( TopicOverview { topicsResponse = Loading }, fetchTopics apiUrl )
 
         ViewTopicRoute name partitionOffsets ->
-            ( TopicDetailPage Loading, fetchTopicDetail apiUrl name partitionOffsets )
+            ( TopicDetailPage { topicDetailResponse = Loading }, fetchTopicDetail apiUrl name partitionOffsets )
 
 
 init : Flags -> Url -> Key -> ( Model, Cmd Msg )
@@ -414,7 +430,7 @@ update msg model =
                 newPage =
                     case model.page of
                         TopicOverview _ ->
-                            TopicOverview response
+                            TopicOverview { topicsResponse = response }
 
                         _ ->
                             model.page
@@ -428,7 +444,7 @@ update msg model =
                 newPage =
                     case model.page of
                         TopicDetailPage _ ->
-                            TopicDetailPage response
+                            TopicDetailPage { topicDetailResponse = response }
 
                         SendMessagePage sendMessagePageModel ->
                             SendMessagePage { sendMessagePageModel | topicDetailResponse = response }
@@ -449,60 +465,376 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "Kafka UI"
     , body =
-        case model.page of
-            TopicDetailPage topic ->
-                [ viewTopicDetail topic ]
-
-            TopicOverview topics ->
-                [ viewTopics topics ]
-
-            SendMessagePage sendMessagePageModel ->
-                [ viewSendMessage sendMessagePageModel ]
-
-            PageNone ->
-                [ div [] [ text "Can not find page" ] ]
+        [ Element.layout [] <|
+            Element.column
+                [ Element.width Element.fill
+                , Element.Font.family
+                    [ Element.Font.monospace
+                    ]
+                ]
+                [ header, viewBody model ]
+        ]
     }
 
 
-viewSendMessage : SendMessagePageModel -> Html Msg
+header : Element.Element Msg
+header =
+    Element.row
+        [ Element.centerX, Element.width Element.fill, Element.height (Element.px 64), Element.Background.color (Element.rgb 0.3 0.3 0.3) ]
+        [ Element.row [ Element.width (Element.fill |> Element.maximum 1600), Element.centerX ]
+            [ Element.link
+                ([ Element.centerY ] ++ getLinkStyle)
+                { url = getPath TopicsRoute
+                , label = Element.text "Topics"
+                }
+            ]
+        ]
+
+
+viewBody : Model -> Element.Element Msg
+viewBody model =
+    let
+        body =
+            case model.page of
+                TopicDetailPage pageModel ->
+                    viewTopicDetailPage pageModel
+
+                TopicOverview pageModel ->
+                    viewTopicOverview pageModel
+
+                SendMessagePage sendMessagePageModel ->
+                    viewSendMessage sendMessagePageModel
+
+                -- [ viewSendMessage sendMessagePageModel ]
+                PageNone ->
+                    Element.el [] (Element.text "Sorry, can't find this page")
+    in
+    Element.column [ Element.width (Element.fill |> Element.maximum 1600), Element.centerX ]
+        [ body ]
+
+
+viewSendMessage : SendMessagePageModel -> Element.Element Msg
 viewSendMessage model =
-    case model.topicDetailResponse of
-        NotAsked ->
-            div [] [ text "Should not be here!" ]
+    let
+        topicName =
+            case model.topicDetailResponse of
+                Success topic ->
+                    topic.name
 
-        Success topicDetail ->
-            let
-                message =
-                    Maybe.withDefault "" model.message
-            in
-            div []
-                [ h1 [] [ text topicDetail.name ]
-                , Html.a [ href (getPath (ViewTopicRoute topicDetail.name Dict.empty)) ] [ text "Back to detail view" ]
-                , div
-                    []
-                    [ Html.select
-                        [ Html.Events.onInput (\input -> ChangeSendMessagePartition (Maybe.withDefault 0 (String.toInt input)))
-                        ]
-                        (List.map
-                            (\partitionDetail ->
-                                Html.option
-                                    [ Html.Attributes.value (String.fromInt partitionDetail.id)
-                                    , Html.Attributes.selected (model.partition == partitionDetail.id)
-                                    ]
-                                    [ text (String.fromInt partitionDetail.id) ]
-                            )
-                            topicDetail.partitionDetails
-                        )
-                    , Html.textarea [ Html.Attributes.rows 50, Html.Attributes.value message, Html.Events.onInput ChangeSendMessage ] []
-                    , Html.button [ Html.Events.onClick (SendMessage topicDetail.name model.partition (Maybe.withDefault "" model.message)) ] [ text "Send" ]
-                    ]
+                _ ->
+                    "Loading..."
+
+        body =
+            case model.topicDetailResponse of
+                NotAsked ->
+                    Element.el [] (Element.text "This should not have happened...")
+
+                Success topic ->
+                    viewMessageForm model.partition model.message topic
+
+                Failure error ->
+                    viewHttpError error
+
+                Loading ->
+                    Element.el [] (Element.text "Loading...")
+    in
+    Element.column [ Element.width Element.fill ]
+        [ Element.row
+            [ Element.paddingEach
+                { top = 100
+                , bottom = 16
+                , left = 0
+                , right = 0
+                }
+            , Element.centerX
+            , Element.centerY
+            ]
+            [ Element.el [ Element.Font.size 62 ] (Element.text topicName) ]
+        , Element.row [ Element.width Element.fill ] [ body ]
+        ]
+
+
+viewMessageForm : Int -> Maybe String -> TopicDetail -> Element.Element Msg
+viewMessageForm partition maybeMessage topicDetail =
+    Element.column [ Element.spacingXY 0 16, Element.width Element.fill ]
+        [ Element.link getLinkStyle { url = getPath (ViewTopicRoute topicDetail.name Dict.empty), label = Element.text "Back to detail view" }
+        , Element.row [] [ Element.text ("Partition: " ++ String.fromInt partition) ]
+        , Element.row [] [ Element.text "Message: " ]
+        , Element.row [ Element.width Element.fill ]
+            [ Element.Input.multiline
+                [ Element.height (Element.px 680)
                 ]
+                { onChange = ChangeSendMessage
+                , text = Maybe.withDefault "" maybeMessage
+                , placeholder = Just (Element.Input.placeholder [] (Element.text "Type you message here"))
+                , label = Element.Input.labelHidden "message"
+                , spellcheck = False
+                }
+            ]
+        , Element.row
+            []
+            [ Element.Input.button
+                [ Element.Background.color (Element.rgb 0.05 0.5 0.8)
+                , Element.paddingXY 16 12
+                , Element.Font.color (Element.rgb 1 1 1)
+                ]
+                { onPress = Just (SendMessage topicDetail.name partition (Maybe.withDefault "" maybeMessage)), label = Element.text "Send" }
+            ]
+        ]
 
-        Failure error ->
-            div [] [ text "Something went wrong while fetching topic" ]
 
-        Loading ->
-            div [] [ text "Loading topic, please hold on..." ]
+viewTopicDetailPage : TopicDetailPageModel -> Element.Element Msg
+viewTopicDetailPage model =
+    let
+        topicName =
+            case model.topicDetailResponse of
+                Success topic ->
+                    topic.name
+
+                _ ->
+                    "Loading..."
+
+        body =
+            case model.topicDetailResponse of
+                NotAsked ->
+                    Element.el [] (Element.text "This should not have happened...")
+
+                Success topic ->
+                    viewTopicDetail topic
+
+                Failure error ->
+                    viewHttpError error
+
+                Loading ->
+                    Element.el [] (Element.text "Loading...")
+    in
+    Element.column [ Element.width Element.fill ]
+        [ Element.row
+            [ Element.paddingEach
+                { top = 100
+                , bottom = 16
+                , left = 0
+                , right = 0
+                }
+            , Element.centerX
+            , Element.centerY
+            ]
+            [ Element.el [ Element.Font.size 62 ] (Element.text topicName) ]
+        , Element.row [ Element.width Element.fill ] [ body ]
+        ]
+
+
+viewTopicDetail : TopicDetail -> Element.Element Msg
+viewTopicDetail topicDetail =
+    let
+        olderLink =
+            getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)
+
+        newerLink =
+            getPath (ViewTopicRoute topicDetail.name (addToOffsets 20 topicDetail.partitionOffsets))
+
+        sendMessageLink =
+            \partition -> getPath (SendMessageRoute topicDetail.name partition)
+    in
+    Element.column
+        [ Element.width Element.fill, Element.spacingXY 0 32 ]
+        (List.map (viewPartitionDetail olderLink newerLink sendMessageLink) topicDetail.partitionDetails)
+
+
+viewTopicDetailTableHeader : String -> String -> (Int -> String) -> PartitionDetail -> Element.Element Msg
+viewTopicDetailTableHeader olderLink newerLink sendMessageLink partitionDetail =
+    Element.row [ Element.width Element.fill ]
+        [ Element.column [ Element.spacingXY 0 16 ]
+            [ Element.row []
+                [ Element.el [] (Element.text ("Partititon [" ++ String.fromInt partitionDetail.id ++ "]"))
+                ]
+            , Element.row []
+                [ Element.el [] (Element.text ("High watermark offset [" ++ String.fromInt partitionDetail.highwatermarkOffset ++ "]"))
+                ]
+            , Element.row []
+                [ Element.link getLinkStyle { label = Element.text "Send message on to this topic and partition", url = sendMessageLink partitionDetail.id }
+                ]
+            ]
+        , Element.column [ Element.width Element.fill ]
+            [ Element.row [ Element.alignRight ]
+                [ Element.link getLinkStyle { label = Element.text "newer", url = newerLink }
+                , Element.el [] (Element.text "/")
+                , Element.link getLinkStyle { label = Element.text "older", url = olderLink }
+                ]
+            ]
+        ]
+
+
+viewTopicDetailTableBody : PartitionDetail -> Element.Element Msg
+viewTopicDetailTableBody partitionDetail =
+    Element.row []
+        [ Element.indexedTable [ Element.Font.alignLeft ]
+            { data = partitionDetail.messages
+            , columns =
+                [ { header = Element.el [ Element.paddingXY 24 12 ] (Element.text "Offset")
+                  , width = Element.px 150
+                  , view = viewTableOffset
+                  }
+                , { header = Element.el [ Element.paddingXY 24 12 ] (Element.text "Message")
+                  , width = Element.fill
+                  , view = viewTableMessage
+                  }
+                , { header = Element.el [ Element.paddingXY 24 12 ] (Element.text "Actions")
+                  , width = Element.px 120
+                  , view = viewTableActions
+                  }
+                ]
+            }
+        ]
+
+
+getTableBackground : Int -> Element.Color
+getTableBackground index =
+    if modBy 2 index == 0 then
+        Element.rgb 0.94 0.94 0.94
+
+    else
+        Element.rgb 1 1 1
+
+
+viewTableMessage : Int -> TopicMessage -> Element.Element Msg
+viewTableMessage index message =
+    Element.paragraph
+        [ Element.paddingXY 24 12
+        , Element.Background.color (getTableBackground index)
+        , Element.height Element.fill
+        ]
+        [ Element.text message.json ]
+
+
+viewTableActions : Int -> TopicMessage -> Element.Element Msg
+viewTableActions index message =
+    Element.paragraph
+        [ Element.paddingXY 24 12
+        , Element.Background.color (getTableBackground index)
+        , Element.height Element.fill
+        , Element.Events.onClick (Copy message.json)
+        ]
+        [ Element.el ([ Element.pointer ] ++ getLinkStyle) (Element.text "Copy") ]
+
+
+viewTableOffset : Int -> TopicMessage -> Element.Element Msg
+viewTableOffset index message =
+    Element.el
+        [ Element.paddingXY 24 12
+        , Element.Background.color (getTableBackground index)
+        , Element.height Element.fill
+        ]
+        (Element.text (String.fromInt message.offset))
+
+
+viewPartitionDetail : String -> String -> (Int -> String) -> PartitionDetail -> Element.Element Msg
+viewPartitionDetail olderLink newerLink sendMessageLink partitionDetail =
+    Element.column [ Element.spacingXY 0 24, Element.width Element.fill ]
+        [ viewTopicDetailTableHeader olderLink newerLink sendMessageLink partitionDetail
+        , viewTopicDetailTableBody partitionDetail
+        ]
+
+
+viewTopicOverview : TopicOverviewPageModel -> Element.Element Msg
+viewTopicOverview model =
+    let
+        body =
+            case model.topicsResponse of
+                NotAsked ->
+                    Element.el [] (Element.text "This should not have happened...")
+
+                Success topics ->
+                    viewTopicList topics
+
+                Failure error ->
+                    viewHttpError error
+
+                Loading ->
+                    Element.el [] (Element.text "Loading...")
+    in
+    Element.column [ Element.width Element.fill ]
+        [ Element.row
+            [ Element.paddingEach
+                { top = 100
+                , bottom = 16
+                , left = 0
+                , right = 0
+                }
+            , Element.centerX
+            , Element.centerY
+            ]
+            [ Element.el [ Element.Font.size 62 ] (Element.text "All topics") ]
+        , Element.row [ Element.width Element.fill ] [ body ]
+        ]
+
+
+viewHttpError : Http.Error -> Element.Element Msg
+viewHttpError error =
+    let
+        message =
+            case error of
+                Http.BadUrl str ->
+                    [ Element.paragraph [] [ Element.el [] (Element.text "Something is wrong with the url:") ]
+                    , Element.paragraph [] [ Element.el [] (Element.text str) ]
+                    ]
+
+                Http.Timeout ->
+                    [ Element.paragraph [] [ Element.el [] (Element.text "Request timed out!") ] ]
+
+                Http.NetworkError ->
+                    [ Element.paragraph [] [ Element.el [] (Element.text "Network error!") ] ]
+
+                Http.BadStatus status ->
+                    [ Element.paragraph [] [ Element.el [] (Element.text ("Got status code [" ++ String.fromInt status ++ "]")) ] ]
+
+                Http.BadBody body ->
+                    [ Element.paragraph [] [ Element.el [] (Element.text "Got unexpected body:") ]
+                    , Element.paragraph [] [ Element.el [] (Element.text body) ]
+                    ]
+    in
+    Element.column [ Element.width Element.fill, Element.Background.color (Element.rgb 0.7 0.4 0.4), Element.padding 24 ]
+        [ Element.el
+            []
+            (Element.textColumn [ Element.width Element.fill ] message)
+        ]
+
+
+getLinkStyle =
+    [ Element.Font.bold, Element.Font.color (Element.rgb 0.06 0.5 0.8) ]
+
+
+viewTopicList : List Topic -> Element.Element Msg
+viewTopicList topics =
+    let
+        viewRow : Topic -> Element.Element Msg
+        viewRow =
+            \topic ->
+                Element.row
+                    [ Element.width Element.fill
+                    , Element.Border.color (Element.rgb 0.95 0.95 0.95)
+                    , Element.Border.solid
+                    , Element.Border.widthEach
+                        { top = 1
+                        , bottom = 0
+                        , right = 0
+                        , left = 0
+                        }
+                    , Element.paddingEach
+                        { top = 12
+                        , bottom = 24
+                        , right = 0
+                        , left = 0
+                        }
+                    ]
+                    [ Element.link
+                        ([] ++ getLinkStyle)
+                        { url = getPath (ViewTopicRoute topic.name Dict.empty)
+                        , label = Element.text topic.name
+                        }
+                    ]
+    in
+    Element.column [ Element.width Element.fill ] (List.map viewRow topics)
 
 
 getTopicOffsetUrl : PartitionOffsets -> String
@@ -516,79 +848,3 @@ getTopicOffsetUrl offsets =
 addToOffsets : Int -> PartitionOffsets -> PartitionOffsets
 addToOffsets n offsets =
     Dict.map (\_ offset -> offset + n) offsets
-
-
-viewTopicDetail : RemoteData Http.Error TopicDetail -> Html Msg
-viewTopicDetail topicDetailResponse =
-    case topicDetailResponse of
-        NotAsked ->
-            div [] [ text "Should not be here!" ]
-
-        Success topicDetail ->
-            div []
-                ([ h1 [] [ text topicDetail.name ]
-                 , Html.a [ href (getPath (SendMessageRoute topicDetail.name 0)) ] [ text "Send new message" ]
-                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name topicDetail.partitionOffsets)) ] [ text "Older" ]
-                 , Html.a [ href (getPath (ViewTopicRoute topicDetail.name (addToOffsets 20 topicDetail.partitionOffsets))) ] [ text "Newer" ]
-                 ]
-                    ++ List.map viewPartitionDetail topicDetail.partitionDetails
-                )
-
-        Failure error ->
-            div [] [ text "Something went wrong while fetching topic" ]
-
-        Loading ->
-            div [] [ text "Loading topic, please hold on..." ]
-
-
-viewPartitionDetail : PartitionDetail -> Html Msg
-viewPartitionDetail partitionDetail =
-    div []
-        [ table []
-            ([ thead []
-                [ td [] [ text "partition" ]
-                , td [] [ text "offset" ]
-                , td [] [ text "message" ]
-                , td [] [ text "action" ]
-                ]
-             ]
-                ++ List.map viewMessage partitionDetail.messages
-            )
-        ]
-
-
-viewMessage : TopicMessage -> Html Msg
-viewMessage message =
-    tr []
-        [ td [] [ text (String.fromInt message.partition) ]
-        , td [] [ text (String.fromInt message.offset) ]
-        , td [] [ text message.json ]
-        , td [Html.Events.onClick (Copy message.json) ] [ text "copy" ]
-        ]
-
-
-viewTopicListItem : Topic -> Html Msg
-viewTopicListItem topic =
-    let
-        linkText =
-            topic.name ++ " (" ++ String.fromInt topic.partitionCount ++ " partitions)"
-    in
-    div []
-        [ Html.a [ class "nav-link", href (getPath (ViewTopicRoute topic.name Dict.empty)) ] [ text linkText ] ]
-
-
-viewTopics : RemoteData Http.Error (List Topic) -> Html Msg
-viewTopics topicsResponse =
-    case topicsResponse of
-        NotAsked ->
-            div [] [ text "Should not be here!" ]
-
-        Success topics ->
-            div []
-                (List.map viewTopicListItem topics)
-
-        Failure error ->
-            div [] [ text "Something went wrong while fetching topics" ]
-
-        Loading ->
-            div [] [ text "Loading topics, please hold on..." ]
