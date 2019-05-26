@@ -1,4 +1,4 @@
-module Main exposing (Model, Msg(..), Page(..), init, main, update, view)
+port module Main exposing (Model, Msg(..), Page(..), init, main, update, view)
 
 import Browser
 import Browser.Navigation exposing (Key)
@@ -32,6 +32,8 @@ main =
         }
 
 
+
+port copy : String -> Cmd msg
 
 -- MODEL
 
@@ -337,6 +339,7 @@ type Msg
     | SendMessageResponse (Result Http.Error ())
     | TopicsResponse (RemoteData Http.Error (List Topic))
     | TopicDetailResponse (RemoteData Http.Error TopicDetail)
+    | Copy String
     | Noop
 
 
@@ -345,6 +348,9 @@ update msg model =
     case msg of
         Noop ->
             ( model, Cmd.none )
+
+        Copy message ->
+            ( model, copy message )
 
         OnUrlChange url ->
             let
@@ -543,6 +549,7 @@ viewPartitionDetail partitionDetail =
                 [ td [] [ text "partition" ]
                 , td [] [ text "offset" ]
                 , td [] [ text "message" ]
+                , td [] [ text "action" ]
                 ]
              ]
                 ++ List.map viewMessage partitionDetail.messages
@@ -556,6 +563,7 @@ viewMessage message =
         [ td [] [ text (String.fromInt message.partition) ]
         , td [] [ text (String.fromInt message.offset) ]
         , td [] [ text message.json ]
+        , td [Html.Events.onClick (Copy message.json) ] [ text "copy" ]
         ]
 
 
