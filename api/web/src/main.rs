@@ -27,16 +27,16 @@ fn redirect_to_index() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/index.html")?.set_status_code(StatusCode::OK))
 }
 
-fn fetch_topics_handler() -> impl Future<Item = HttpResponse, Error = Error> {
+fn fetch_topics_handler() -> impl Future<Item=HttpResponse, Error=Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_topics(&mut client)
     })
-    .then(|res| match res {
-        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-        Err(_) => Ok(HttpResponse::InternalServerError().into()),
-    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,7 +48,7 @@ struct SendMessageRequest {
 fn fetch_topic_detail_from_handler(
     topic_name: web::Path<String>,
     offsets: Query<Offsets>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item=HttpResponse, Error=Error> {
     // TODO: can actix-web parse lists from query?
     let partitions: Vec<(i32, i64)> = offsets
         .offsets
@@ -82,10 +82,10 @@ fn fetch_topic_detail_from_handler(
 
         fetch_from_topic_detail(&mut client, &topic_name, &partition_offsets)
     })
-    .then(|res| match res {
-        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-        Err(_) => Ok(HttpResponse::InternalServerError().into()),
-    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
 }
 
 #[derive(Deserialize, Debug)]
@@ -95,30 +95,35 @@ struct Offsets {
 
 fn fetch_topic_detail_handler(
     name: web::Path<String>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item=HttpResponse, Error=Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_latest_topic_detail(&mut client, &name)
     })
-    .then(|res| match res {
-        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-        Err(_) => Ok(HttpResponse::InternalServerError().into()),
-    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
 }
+
 fn send_message_to_topic_handler(
     topic_name: web::Path<String>,
     item: web::Json<SendMessageRequest>,
-) -> impl Future<Item = HttpResponse, Error = Error> {
+) -> impl Future<Item=HttpResponse, Error=Error> {
     web::block(move || {
         let mut client = get_client();
 
         send_message_to_topic(&mut client, &topic_name, item.partition, &item.message)
     })
-    .then(|res| match res {
-        Ok(topics) => Ok(HttpResponse::Ok().finish()),
-        Err(_) => Ok(HttpResponse::InternalServerError().into()),
-    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().finish()),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
+}
+
+fn string_to_static_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
 }
 
 fn main() -> io::Result<()> {
@@ -135,7 +140,6 @@ fn main() -> io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(
                 Cors::new()
-                    .allowed_origin("http://localhost:3000")
                     .allowed_methods(vec!["GET", "POST"]),
             )
             .service(favicon)
@@ -159,7 +163,7 @@ fn main() -> io::Result<()> {
                                     err,
                                     HttpResponse::Conflict().finish(),
                                 )
-                                .into()
+                                    .into()
                             }),
                     )
                     .route(web::post().to_async(send_message_to_topic_handler)),
@@ -177,8 +181,8 @@ fn main() -> io::Result<()> {
                     ),
             )
     })
-    .bind(&listen)?
-    .start();
+        .bind(&listen)?
+        .start();
 
     println!("Starting http server: {}", listen);
     sys.run()
