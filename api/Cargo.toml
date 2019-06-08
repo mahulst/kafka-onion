@@ -5,3 +5,6 @@ members = [
     "web",
     "read-topic-api",
 ]
+
+[profile.release]
+debug = true
