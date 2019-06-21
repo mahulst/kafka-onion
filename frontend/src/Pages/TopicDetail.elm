@@ -1,13 +1,17 @@
-port module Pages.TopicDetail exposing (Model, Msg(..), view, update)
+port module Pages.TopicDetail exposing (Model, Msg(..), update, view)
 
 import Dict
 import Element
 import Element.Background
 import Element.Events
 import Element.Font
+import Html exposing (Html)
+import Html.Attributes
 import Http
+import JsonTree
 import RemoteData exposing (RemoteData(..))
 import Routes exposing (browseTopic, sendMessageRoute)
+import Set exposing (Set)
 import Shared exposing (Flags, getLinkStyle, viewHttpError)
 import Topic exposing (PartitionDetail, Topic, TopicDetail, TopicMessage, addToOffsets)
 
@@ -16,13 +20,15 @@ port copy : String -> Cmd msg
 
 
 type alias Model =
-    { topicDetailResponse : RemoteData Http.Error TopicDetail }
+    { topicDetailResponse : RemoteData Http.Error TopicDetail, messagesInJsonViewer : Set ( Int, Int ) }
 
 
 type Msg
     = TopicDetailLoaded (RemoteData Http.Error TopicDetail)
     | TopicDetailResponse (RemoteData Http.Error TopicDetail)
     | Copy String
+    | ToggleJsonView Int Int
+    | Noop
 
 
 update : Flags -> Msg -> Model -> ( Model, Cmd Msg )
@@ -34,19 +40,43 @@ update flags msg model =
         TopicDetailLoaded topicDetailResponse ->
             let
                 newModel =
-                    { topicDetailResponse = topicDetailResponse }
+                    { model | topicDetailResponse = topicDetailResponse }
             in
             ( newModel
             , Cmd.none
             )
+
         TopicDetailResponse topicDetailResponse ->
             let
                 newModel =
-                    { topicDetailResponse = topicDetailResponse }
+                    { model | topicDetailResponse = topicDetailResponse }
             in
             ( newModel
             , Cmd.none
             )
+
+        ToggleJsonView partition offset ->
+            let
+                key =
+                    ( partition, offset )
+
+                isKeyInSet =
+                    Set.member key model.messagesInJsonViewer
+
+                newSet =
+                    if isKeyInSet then
+                        Set.remove key model.messagesInJsonViewer
+
+                    else
+                        Set.insert key model.messagesInJsonViewer
+
+                newModel =
+                    { model | messagesInJsonViewer = newSet }
+            in
+            ( newModel, Cmd.none )
+
+        Noop ->
+            ( model, Cmd.none )
 
 
 view : Model -> Element.Element Msg
@@ -64,9 +94,9 @@ view model =
             topicDetail.name
 
         body =
-            viewTopicDetail topicDetail
+            viewTopicDetail topicDetail model.messagesInJsonViewer
     in
-    Element.column [ Element.width (Element.fill |> Element.maximum 1600), Element.explain Debug.todo ]
+    Element.column [ Element.width (Element.fill |> Element.maximum 1600) ]
         [ Element.row
             [ Element.paddingEach
                 { top = 100
@@ -82,8 +112,8 @@ view model =
         ]
 
 
-viewTopicDetail : TopicDetail -> Element.Element Msg
-viewTopicDetail topicDetail =
+viewTopicDetail : TopicDetail -> Set ( Int, Int ) -> Element.Element Msg
+viewTopicDetail topicDetail messagesInJson =
     let
         olderLink =
             browseTopic topicDetail.name topicDetail.partitionOffsets
@@ -96,7 +126,7 @@ viewTopicDetail topicDetail =
     in
     Element.column
         [ Element.width Element.fill, Element.spacingXY 0 32 ]
-        (List.map (viewPartitionDetail olderLink newerLink sendMessageLink) topicDetail.partitionDetails)
+        (List.map (viewPartitionDetail olderLink newerLink messagesInJson sendMessageLink) topicDetail.partitionDetails)
 
 
 viewTopicDetailTableHeader : String -> String -> (Int -> String) -> PartitionDetail -> Element.Element Msg
@@ -123,9 +153,9 @@ viewTopicDetailTableHeader olderLink newerLink sendMessageLink partitionDetail =
         ]
 
 
-viewTopicDetailTableBody : PartitionDetail -> Element.Element Msg
-viewTopicDetailTableBody partitionDetail =
-    Element.row [Element.width Element.fill]
+viewTopicDetailTableBody : PartitionDetail -> Set ( Int, Int ) -> Element.Element Msg
+viewTopicDetailTableBody partitionDetail messagesInJson =
+    Element.wrappedRow [ Element.width Element.fill ]
         [ Element.indexedTable [ Element.Font.alignLeft ]
             { data = partitionDetail.messages
             , columns =
@@ -135,10 +165,10 @@ viewTopicDetailTableBody partitionDetail =
                   }
                 , { header = Element.el [ Element.paddingXY 24 12 ] (Element.text "Message")
                   , width = Element.fill
-                  , view = viewTableMessage
+                  , view = viewTableMessage messagesInJson
                   }
                 , { header = Element.el [ Element.paddingXY 24 12 ] (Element.text "Actions")
-                  , width = Element.px 120
+                  , width = Element.px 220
                   , view = viewTableActions
                   }
                 ]
@@ -155,14 +185,43 @@ getTableBackground index =
         Element.rgb 1 1 1
 
 
-viewTableMessage : Int -> TopicMessage -> Element.Element Msg
-viewTableMessage index message =
+viewTableMessage : Set ( Int, Int ) -> Int -> TopicMessage -> Element.Element Msg
+viewTableMessage messagesInJson index message =
+    let
+        bodyPlainText =
+            Element.text message.json
+
+        bodyJsonViewer =
+            Element.html <| viewJsonMessage message.json
+
+        thisMessageInJson =
+            Set.member ( message.partition, message.offset ) messagesInJson
+
+        body =
+            if thisMessageInJson then
+                bodyJsonViewer
+
+            else
+                bodyPlainText
+    in
     Element.paragraph
         [ Element.paddingXY 24 12
         , Element.Background.color (getTableBackground index)
-        , Element.height Element.fill
+        , Element.width (Element.fill |> Element.maximum 1230)
+        , Element.clipX
         ]
-        [ Element.text message.json ]
+        [ body ]
+
+
+config =
+    { onSelect = Nothing, toMsg = always Noop, colors = JsonTree.defaultColors }
+
+
+viewJsonMessage : String -> Html Msg
+viewJsonMessage json =
+    JsonTree.parseString json
+        |> Result.map (\tree -> JsonTree.view tree config JsonTree.defaultState)
+        |> Result.withDefault (Html.div [ Html.Attributes.class "break-word" ] [ Html.text ("Failed to parse JSON: " ++ json) ])
 
 
 viewTableActions : Int -> TopicMessage -> Element.Element Msg
@@ -171,9 +230,24 @@ viewTableActions index message =
         [ Element.paddingXY 24 12
         , Element.Background.color (getTableBackground index)
         , Element.height Element.fill
-        , Element.Events.onClick (Copy message.json)
         ]
-        [ Element.el ([ Element.pointer ] ++ getLinkStyle) (Element.text "Copy") ]
+        [ Element.row
+            ([]
+                ++ getLinkStyle
+            )
+            [ Element.el
+                [ Element.pointer
+                , Element.Events.onClick (Copy message.json)
+                ]
+                (Element.text "Copy")
+            , Element.text " / "
+            , Element.el
+                [ Element.pointer
+                , Element.Events.onClick (ToggleJsonView message.partition message.offset)
+                ]
+                (Element.text "Inspect")
+            ]
+        ]
 
 
 viewTableOffset : Int -> TopicMessage -> Element.Element Msg
@@ -186,9 +260,9 @@ viewTableOffset index message =
         (Element.text (String.fromInt message.offset))
 
 
-viewPartitionDetail : String -> String -> (Int -> String) -> PartitionDetail -> Element.Element Msg
-viewPartitionDetail olderLink newerLink sendMessageLink partitionDetail =
+viewPartitionDetail : String -> String -> Set ( Int, Int ) -> (Int -> String) -> PartitionDetail -> Element.Element Msg
+viewPartitionDetail olderLink newerLink messagesInJson sendMessageLink partitionDetail  =
     Element.column [ Element.spacingXY 0 24, Element.width Element.fill ]
         [ viewTopicDetailTableHeader olderLink newerLink sendMessageLink partitionDetail
-        , viewTopicDetailTableBody partitionDetail
+        , viewTopicDetailTableBody partitionDetail messagesInJson
         ]

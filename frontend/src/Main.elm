@@ -13,6 +13,7 @@ import Pages.TopicDetail as TopicDetail
 import Pages.TopicOverview as TopicOverview exposing (Msg(..))
 import RemoteData exposing (RemoteData(..))
 import Routes exposing (Route, getTopicOverViewPath, parseUrl)
+import Set
 import Shared exposing (Flags, getLinkStyle)
 import Topic exposing (PartitionDetail, PartitionOffsets, Topic, TopicDetail, decodeTopicDetail, decodeTopics)
 import Url exposing (Url)
@@ -75,7 +76,7 @@ loadCurrentPage ( model, cmd ) =
                     ( TopicOverviewPage { topicsResponse = Loading }, fetchTopics model.flags.apiUrl )
 
                 Routes.ViewTopicRoute a offsets ->
-                    ( TopicDetailPage { topicDetailResponse = Loading }, fetchTopicDetail model.flags.apiUrl a offsets )
+                    ( TopicDetailPage { topicDetailResponse = Loading, messagesInJsonViewer = Set.empty }, fetchTopicDetail model.flags.apiUrl a offsets )
     in
     ( { model | page = page }, Cmd.batch [ cmd, newCmd ] )
 

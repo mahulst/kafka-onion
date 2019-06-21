@@ -23,3 +23,8 @@ img {
   margin: 20px 0;
   max-width: 200px;
 }
+
+.break-word {
+
+  word-wrap: break-word;
+}
