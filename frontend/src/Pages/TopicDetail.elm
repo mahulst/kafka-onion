@@ -93,7 +93,8 @@ view model =
                 _ ->
                     Element.text "Loading..."
 
-        topicName = RemoteData.unwrap "..." .name model.topicDetailResponse
+        topicName =
+            RemoteData.unwrap "..." .name model.topicDetailResponse
     in
     Element.column [ Element.width (Element.fill |> Element.maximum 1600) ]
         [ Element.row

@@ -1,4 +1,4 @@
-module Pages.TopicOverview exposing (Model,  view, Msg(..), update)
+module Pages.TopicOverview exposing (Model, Msg(..), update, view)
 
 import Element
 import Element.Border
@@ -41,7 +41,7 @@ view model =
                     Element.el [] (Element.text "This should not have happened...")
 
                 Success topics ->
-                    viewTopicList topics
+                    viewTopicList (sortTopicList topics)
 
                 Failure error ->
                     viewHttpError error
@@ -63,6 +63,11 @@ view model =
             [ Element.el [ Element.Font.size 62 ] (Element.text "All topics") ]
         , Element.row [ Element.width Element.fill ] [ body ]
         ]
+
+
+sortTopicList : List Topic -> List Topic
+sortTopicList list =
+    List.sortBy .name list
 
 
 viewTopicList : List Topic -> Element.Element Msg
