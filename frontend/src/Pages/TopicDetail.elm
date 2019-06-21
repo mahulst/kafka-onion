@@ -82,19 +82,18 @@ update flags msg model =
 view : Model -> Element.Element Msg
 view model =
     let
-        topicDetail =
+        body =
             case model.topicDetailResponse of
-                Success e ->
-                    e
+                Success topicDetail ->
+                    viewTopicDetail topicDetail model.messagesInJsonViewer
+
+                Failure e ->
+                    viewHttpError e
 
                 _ ->
-                    TopicDetail "..." Dict.empty []
+                    Element.text "Loading..."
 
-        topicName =
-            topicDetail.name
-
-        body =
-            viewTopicDetail topicDetail model.messagesInJsonViewer
+        topicName = RemoteData.unwrap "..." .name model.topicDetailResponse
     in
     Element.column [ Element.width (Element.fill |> Element.maximum 1600) ]
         [ Element.row
@@ -261,7 +260,7 @@ viewTableOffset index message =
 
 
 viewPartitionDetail : String -> String -> Set ( Int, Int ) -> (Int -> String) -> PartitionDetail -> Element.Element Msg
-viewPartitionDetail olderLink newerLink messagesInJson sendMessageLink partitionDetail  =
+viewPartitionDetail olderLink newerLink messagesInJson sendMessageLink partitionDetail =
     Element.column [ Element.spacingXY 0 24, Element.width Element.fill ]
         [ viewTopicDetailTableHeader olderLink newerLink sendMessageLink partitionDetail
         , viewTopicDetailTableBody partitionDetail messagesInJson
