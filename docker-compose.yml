@@ -4,7 +4,7 @@ services:
   production-build:
     image: mahulst/kafka-ui
     environment:
-      - KAFKA_BROKER_LIST=kafka:29092
+      - KAFKA_BROKER_LIST=kafka:9092
       - API_PORT=8081
     ports:
       - 8081:8081
@@ -12,7 +12,7 @@ services:
       - 8081
   service:
     environment:
-      - KAFKA_BROKER_LIST=kafka:29092
+      - KAFKA_BROKER_LIST=kafka:9092
     build:
       context: .
       dockerfile: ./Dockerfile

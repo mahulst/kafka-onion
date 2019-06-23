@@ -215,7 +215,7 @@ fn main() -> io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(
                 Cors::new()
-                    .allowed_methods(vec!["GET", "POST"]),
+                    .allowed_methods(vec!["GET", "POST", "DELETE"]),
             )
             .service(favicon)
             .service(web::resource("api/topics").route(web::get().to_async(fetch_topics_handler)))
