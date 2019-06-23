@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/mahulst/kafka-onion.svg?branch=master)](https://travis-ci.org/mahulst/kafka-onion)
+
 # Kafka Onion
 
 A tiny, lightweight interface you can used to inspect kafka topics while developing.
