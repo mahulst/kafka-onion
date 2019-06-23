@@ -1,4 +1,4 @@
-module Routes exposing (Route(..), getPath, getViewTopicPath, parseUrl, routeParser, browseTopic, getTopicOverViewPath, sendMessageRoute)
+module Routes exposing (Route(..), browseTopic, getPath, getTopicOverViewPath, getViewTopicPath, parseUrl, routeParser, sendMessageRoute)
 
 import Dict
 import Topic exposing (PartitionOffsets)
@@ -99,11 +99,15 @@ getViewTopicPath name =
 
 
 browseTopic : String -> PartitionOffsets -> String
-browseTopic name partitionOffsets =  getPath (ViewTopicRoute name partitionOffsets)
+browseTopic name partitionOffsets =
+    getPath (ViewTopicRoute name partitionOffsets)
 
 
-getTopicOverViewPath: String
-getTopicOverViewPath =  getPath TopicsRoute
+getTopicOverViewPath : String
+getTopicOverViewPath =
+    getPath TopicsRoute
 
-sendMessageRoute: String -> Int -> String
-sendMessageRoute name partition  = getPath (SendMessageRoute name partition)
+
+sendMessageRoute : String -> Int -> String
+sendMessageRoute name partition =
+    getPath (SendMessageRoute name partition)

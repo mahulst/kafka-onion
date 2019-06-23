@@ -6,7 +6,7 @@ import Element.Font
 import Http
 import RemoteData exposing (RemoteData(..))
 import Routes exposing (getViewTopicPath)
-import Shared exposing (Flags, getLinkStyle, viewHttpError)
+import Shared exposing (Config, getLinkStyle, viewHttpError)
 import Topic exposing (Topic)
 
 
@@ -19,8 +19,8 @@ type Msg
     = TopicsResponse (RemoteData Http.Error (List Topic))
 
 
-update : Flags -> Msg -> Model -> ( Model, Cmd Msg )
-update flags msg model =
+update : Config -> Msg -> Model -> ( Model, Cmd Msg )
+update config msg model =
     case msg of
         TopicsResponse response ->
             let

@@ -1,5 +1,6 @@
 port module Pages.TopicDetail exposing (Model, Msg(..), update, view)
 
+import Browser.Navigation exposing (pushUrl, reload)
 import Dict
 import Element
 import Element.Background
@@ -7,13 +8,14 @@ import Element.Events
 import Element.Font
 import Html exposing (Html)
 import Html.Attributes
-import Http
+import Http exposing (emptyBody)
 import JsonTree
 import RemoteData exposing (RemoteData(..))
-import Routes exposing (browseTopic, sendMessageRoute)
+import Routes exposing (Route(..), browseTopic, getPath, sendMessageRoute)
 import Set exposing (Set)
-import Shared exposing (Flags, getLinkStyle, viewHttpError)
+import Shared exposing (Config, getDangerousLinkStyle, getLinkStyle, viewHttpError)
 import Topic exposing (PartitionDetail, Topic, TopicDetail, TopicMessage, addToOffsets)
+import Url.Builder exposing (absolute, relative)
 
 
 port copy : String -> Cmd msg
@@ -24,27 +26,21 @@ type alias Model =
 
 
 type Msg
-    = TopicDetailLoaded (RemoteData Http.Error TopicDetail)
-    | TopicDetailResponse (RemoteData Http.Error TopicDetail)
+    = TopicDetailResponse (RemoteData Http.Error TopicDetail)
     | Copy String
+    | DeleteTopic String
+    | TopicDeleted (Result Http.Error ())
+    | ResetTopic String
+    | TopicReset (Result Http.Error ())
     | ToggleJsonView Int Int
     | Noop
 
 
-update : Flags -> Msg -> Model -> ( Model, Cmd Msg )
-update flags msg model =
+update : Config -> Msg -> Model -> ( Model, Cmd Msg )
+update config msg model =
     case msg of
         Copy message ->
             ( model, copy message )
-
-        TopicDetailLoaded topicDetailResponse ->
-            let
-                newModel =
-                    { model | topicDetailResponse = topicDetailResponse }
-            in
-            ( newModel
-            , Cmd.none
-            )
 
         TopicDetailResponse topicDetailResponse ->
             let
@@ -74,6 +70,18 @@ update flags msg model =
                     { model | messagesInJsonViewer = newSet }
             in
             ( newModel, Cmd.none )
+
+        DeleteTopic topicName ->
+            ( model, deleteTopic config.apiUrl topicName )
+
+        ResetTopic topicName ->
+            ( model, resetTopic config.apiUrl topicName )
+
+        TopicDeleted _ ->
+            ( model, pushUrl config.key (relative [ getPath TopicsRoute ] []) )
+
+        TopicReset _ ->
+            ( model, reload )
 
         Noop ->
             ( model, Cmd.none )
@@ -106,10 +114,60 @@ view model =
                 }
             , Element.centerX
             , Element.centerY
+            , Element.spacingXY 24 0
             ]
-            [ Element.el [ Element.Font.size 62 ] (Element.text topicName) ]
+            [ Element.el [ Element.Font.size 62 ] (Element.text topicName)
+            , Element.el
+                (getDangerousLinkStyle
+                    ++ [ Element.pointer
+                       , Element.Events.onClick (DeleteTopic topicName)
+                       ]
+                )
+                (Element.text "Delete")
+            , Element.el
+                (getDangerousLinkStyle
+                    ++ [ Element.pointer
+                       , Element.Events.onClick (ResetTopic topicName)
+                       ]
+                )
+                (Element.text "Reset")
+            ]
         , Element.row [ Element.width Element.fill ] [ body ]
         ]
+
+
+resetTopic : String -> String -> Cmd Msg
+resetTopic apiUrl topicName =
+    let
+        url =
+            apiUrl ++ "/api/v2/topic/" ++ topicName ++ "/reset"
+    in
+    Http.request
+        { method = "DELETE"
+        , url = url
+        , body = emptyBody
+        , tracker = Nothing
+        , timeout = Nothing
+        , headers = []
+        , expect = Http.expectWhatever TopicReset
+        }
+
+
+deleteTopic : String -> String -> Cmd Msg
+deleteTopic apiUrl topicName =
+    let
+        url =
+            apiUrl ++ "/api/v2/topic/" ++ topicName ++ ""
+    in
+    Http.request
+        { method = "DELETE"
+        , url = url
+        , body = emptyBody
+        , tracker = Nothing
+        , timeout = Nothing
+        , headers = []
+        , expect = Http.expectWhatever TopicDeleted
+        }
 
 
 viewTopicDetail : TopicDetail -> Set ( Int, Int ) -> Element.Element Msg
@@ -213,14 +271,14 @@ viewTableMessage messagesInJson index message =
         [ body ]
 
 
-config =
+jsonTreeConfig =
     { onSelect = Nothing, toMsg = always Noop, colors = JsonTree.defaultColors }
 
 
 viewJsonMessage : String -> Html Msg
 viewJsonMessage json =
     JsonTree.parseString json
-        |> Result.map (\tree -> JsonTree.view tree config JsonTree.defaultState)
+        |> Result.map (\tree -> JsonTree.view tree jsonTreeConfig JsonTree.defaultState)
         |> Result.withDefault (Html.div [ Html.Attributes.class "break-word" ] [ Html.text ("Failed to parse JSON: " ++ json) ])
 
 

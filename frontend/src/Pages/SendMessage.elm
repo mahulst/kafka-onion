@@ -1,14 +1,14 @@
-module Pages.SendMessage exposing (Model, view, Msg(..), update)
-import Element.Background
-import Json.Encode as E
+module Pages.SendMessage exposing (Model, Msg(..), update, view)
 
 import Element
+import Element.Background
 import Element.Font
 import Element.Input
 import Http
+import Json.Encode as E
 import RemoteData exposing (RemoteData(..))
 import Routes exposing (Route(..), getViewTopicPath)
-import Shared exposing (Flags, getLinkStyle, viewHttpError)
+import Shared exposing (Config, getLinkStyle, viewHttpError)
 import Topic exposing (TopicDetail)
 
 
@@ -26,12 +26,11 @@ type Msg
     | SendMessageResponse (Result Http.Error ())
 
 
-update : Flags -> Msg -> Model -> ( Model, Cmd Msg )
-update flags msg model =
+update : Config -> Msg -> Model -> ( Model, Cmd Msg )
+update config msg model =
     case msg of
-
         SendMessage topicName partition message ->
-            ( model, sendMessage flags.apiUrl topicName partition message )
+            ( model, sendMessage config.apiUrl topicName partition message )
 
         SendMessageResponse _ ->
             ( model, Cmd.none )
@@ -49,7 +48,6 @@ update flags msg model =
                     { model | partition = partition }
             in
             ( newModel, Cmd.none )
-
 
 
 encodeSendMessageRequest : Int -> String -> E.Value
@@ -78,7 +76,6 @@ sendMessage apiUrl topicName partition message =
         , headers = []
         , expect = Http.expectWhatever SendMessageResponse
         }
-
 
 
 view : Model -> Element.Element Msg

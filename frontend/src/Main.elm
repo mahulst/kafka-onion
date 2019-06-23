@@ -14,7 +14,7 @@ import Pages.TopicOverview as TopicOverview exposing (Msg(..))
 import RemoteData exposing (RemoteData(..))
 import Routes exposing (Route, getTopicOverViewPath, parseUrl)
 import Set
-import Shared exposing (Flags, getLinkStyle)
+import Shared exposing (Config, Flags, getLinkStyle)
 import Topic exposing (PartitionDetail, PartitionOffsets, Topic, TopicDetail, decodeTopicDetail, decodeTopics)
 import Url exposing (Url)
 
@@ -41,8 +41,7 @@ main =
 
 type alias Model =
     { page : Page
-    , key : Key
-    , flags : Flags
+    , config : Config
     , route : Route
     }
 
@@ -67,23 +66,32 @@ loadCurrentPage ( model, cmd ) =
                         pageModel =
                             { topicDetailResponse = Loading, partition = partition, message = Nothing }
                     in
-                    ( SendMessagePage pageModel, fetchTopicDetail model.flags.apiUrl topicName Dict.empty )
+                    ( SendMessagePage pageModel, fetchTopicDetail model.config.apiUrl topicName Dict.empty )
 
                 Routes.RootRoute ->
-                    ( TopicOverviewPage { topicsResponse = Loading }, fetchTopics model.flags.apiUrl )
+                    ( TopicOverviewPage { topicsResponse = Loading }, fetchTopics model.config.apiUrl )
 
                 Routes.TopicsRoute ->
-                    ( TopicOverviewPage { topicsResponse = Loading }, fetchTopics model.flags.apiUrl )
+                    ( TopicOverviewPage { topicsResponse = Loading }, fetchTopics model.config.apiUrl )
 
                 Routes.ViewTopicRoute a offsets ->
-                    ( TopicDetailPage { topicDetailResponse = Loading, messagesInJsonViewer = Set.empty }, fetchTopicDetail model.flags.apiUrl a offsets )
+                    ( TopicDetailPage { topicDetailResponse = Loading, messagesInJsonViewer = Set.empty }, fetchTopicDetail model.config.apiUrl a offsets )
     in
     ( { model | page = page }, Cmd.batch [ cmd, newCmd ] )
 
 
 init : Flags -> Url -> Key -> ( Model, Cmd Msg )
 init flags url key =
-    ( { page = PageNone, key = key, flags = flags, route = parseUrl url }, Cmd.none ) |> loadCurrentPage
+    ( { page = PageNone
+      , config =
+            { apiUrl = flags.apiUrl
+            , key = key
+            }
+      , route = parseUrl url
+      }
+    , Cmd.none
+    )
+        |> loadCurrentPage
 
 
 encodePartitionOffsets : PartitionOffsets -> E.Value
@@ -165,7 +173,7 @@ update msg model =
             case urlRequest of
                 Browser.Internal url ->
                     ( model
-                    , Browser.Navigation.pushUrl model.key (Url.toString url)
+                    , Browser.Navigation.pushUrl model.config.key (Url.toString url)
                     )
 
                 Browser.External url ->
@@ -195,21 +203,21 @@ update msg model =
         ( TopicOverviewMsg subMsg, TopicOverviewPage pageModel ) ->
             let
                 ( newPageModel, _ ) =
-                    TopicOverview.update model.flags subMsg pageModel
+                    TopicOverview.update model.config subMsg pageModel
             in
             ( { model | page = TopicOverviewPage newPageModel }, Cmd.none )
 
         ( SendMessageMsg subMsg, SendMessagePage pageModel ) ->
             let
                 ( newPageModel, newSubCmd ) =
-                    SendMessage.update model.flags subMsg pageModel
+                    SendMessage.update model.config subMsg pageModel
             in
             ( { model | page = SendMessagePage newPageModel }, newSubCmd |> Cmd.map SendMessageMsg )
 
         ( TopicDetailMsg subMsg, TopicDetailPage pageModel ) ->
             let
                 ( newPageModel, newSubCmd ) =
-                    TopicDetail.update model.flags subMsg pageModel
+                    TopicDetail.update model.config subMsg pageModel
             in
             ( { model | page = TopicDetailPage newPageModel }, newSubCmd |> Cmd.map TopicDetailMsg )
 

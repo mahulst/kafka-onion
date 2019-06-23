@@ -1,11 +1,20 @@
-module Shared exposing (Flags, viewHttpError, getLinkStyle)
+module Shared exposing (Config, Flags, getDangerousLinkStyle, getLinkStyle, viewHttpError)
 
+import Browser.Navigation exposing (Key)
 import Element
 import Element.Background
 import Element.Font
 import Http
+
+
 type alias Flags =
     { apiUrl : String }
+
+
+type alias Config =
+    { apiUrl : String
+    , key : Key
+    }
 
 
 viewHttpError : Http.Error -> Element.Element msg
@@ -32,13 +41,24 @@ viewHttpError error =
                     , Element.paragraph [] [ Element.el [] (Element.text body) ]
                     ]
     in
-    Element.column [ Element.width Element.fill, Element.Background.color (Element.rgb 0.7 0.4 0.4), Element.padding 24 ]
+    Element.column [ Element.width Element.fill, Element.Background.color red, Element.padding 24 ]
         [ Element.el
             []
             (Element.textColumn [ Element.width Element.fill ] message)
         ]
 
 
-getLinkStyle =
-    [ Element.Font.bold, Element.Font.color (Element.rgb 0.06 0.5 0.8) ]
+red =
+    Element.rgb 0.7 0.4 0.4
 
+
+blue =
+    Element.rgb 0.06 0.5 0.8
+
+
+getLinkStyle =
+    [ Element.Font.bold, Element.Font.color blue ]
+
+
+getDangerousLinkStyle =
+    [ Element.Font.bold, Element.Font.color red ]
