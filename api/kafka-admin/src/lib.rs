@@ -18,9 +18,6 @@ use rdkafka::client::DefaultClientContext;
 use std::time::Duration;
 use std::{thread, env};
 
-mod example_utils;
-
-use crate::example_utils::setup_logger;
 use rdkafka::admin::ResourceSpecifier::Topic;
 use std::collections::HashMap;
 use rdkafka::TopicPartitionList;
