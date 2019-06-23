@@ -5,7 +5,7 @@ extern crate serde_derive;
 extern crate actix_web;
 
 use std::{env, io};
-
+use kafka_admin::{fetch_topic_detail, delete_topic, reset_topic, create_topic, TopicDetailResponse, PartitionDetailResponse};
 use actix_files as fs;
 use actix_web::http::StatusCode;
 use actix_web::middleware::cors::Cors;
@@ -32,6 +32,81 @@ fn fetch_topics_handler() -> impl Future<Item=HttpResponse, Error=Error> {
         let mut client = get_client();
 
         fetch_topics(&mut client)
+    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
+}
+//
+//fn fetch_messages(
+//    topic_name: web::Path<String>,
+//    offsets: Query<Offsets>,
+//) -> impl Future<Item=HttpResponse, Error=Error> {
+//    web::block(move || {
+//        let mut client = get_client();
+//        let partitions: Vec<(i32, i64)> = offsets
+//            .offsets
+//            .split(',')
+//            .map(|el| {
+//                let els: Vec<&str> = el.split(';').collect();
+//                let partition = els.first().expect("No partition found in offsets");
+//                let offset = els.last().expect("No offset found in offsets");
+//
+//                return (
+//                    partition
+//                        .parse::<i32>()
+//                        .expect("Offsets should contain numbers"),
+//                    offset
+//                        .parse::<i64>()
+//                        .expect("Offsets should contain numbers"),
+//                );
+//            })
+//            .collect();
+//        let mut partition_offsets = HashMap::new();
+//        let partition_offsets: HashMap<i32, i64> =
+//            partitions
+//                .iter()
+//                .fold(partition_offsets, |mut acc, (partition, offset)| {
+//                    acc.insert(*partition, *offset);
+//                    acc
+//                });
+//
+//        consume("localhost:9092", "hello_123", "hello_world", &partition_offsets)
+//    })
+//        .then(|res| match res {
+//            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+//            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+//        })
+//}
+
+fn delete_topic_handler(
+    topic_name: web::Path<String>,
+) -> impl Future<Item=HttpResponse, Error=Error> {
+    web::block(move || {
+        delete_topic(&topic_name)
+    })
+        .then(|res| match res {
+            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
+}
+
+fn reset_topic_handler(
+    topic_name: web::Path<String>,
+) -> impl Future<Item=HttpResponse, Error=Error> {
+    web::block(move || {
+        reset_topic(&topic_name)
+    })
+        .then(|res| match res {
+            Ok(_) => Ok(HttpResponse::NoContent().finish()),
+            Err(_) => Ok(HttpResponse::InternalServerError().into()),
+        })
+}
+
+fn fetch_topics_handler_v2() -> impl Future<Item=HttpResponse, Error=Error> {
+    web::block(move || {
+        fetch_topic_detail(None)
     })
         .then(|res| match res {
             Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
@@ -144,14 +219,27 @@ fn main() -> io::Result<()> {
             )
             .service(favicon)
             .service(web::resource("api/topics").route(web::get().to_async(fetch_topics_handler)))
+            .service(web::resource("api/v2/topics").route(web::get().to_async(fetch_topics_handler_v2)))
             .service(
                 web::resource("api/topic/{topic_name}")
                     .route(web::get().to_async(fetch_topic_detail_handler)),
             )
             .service(
+                web::resource("api/v2/topic/{topic_name}/reset")
+                    .route(web::delete().to_async(reset_topic_handler)),
+            )
+            .service(
+                web::resource("api/v2/topic/{topic_name}")
+                    .route(web::delete().to_async(delete_topic_handler)),
+            )
+            .service(
                 web::resource("api/topic/{topic_name}/from")
                     .route(web::get().to_async(fetch_topic_detail_from_handler)),
             )
+//            .service(
+//                web::resource("api/v2/topic/{topic_name}/messages")
+//                    .route(web::get().to_async(fetch_messages)),
+//            )
             .service(
                 web::resource("api/topic/{topic_name}/sendMessage")
                     .data(
