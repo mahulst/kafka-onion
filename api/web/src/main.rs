@@ -244,7 +244,7 @@ fn main() -> io::Result<()> {
                 web::resource("api/topic/{topic_name}/sendMessage")
                     .data(
                         web::JsonConfig::default()
-                            .limit(4096) // <- limit size of the payload
+                            .limit(10 * 1024 * 1024) // <- limit size of the payload
                             .error_handler(|err, _| {
                                 // <- create custom error response
                                 error::InternalError::from_response(
