@@ -4,25 +4,24 @@ extern crate serde_derive;
 extern crate log;
 extern crate rdkafka;
 
-use rdkafka::message::{Message, Headers};
-use rdkafka::client::ClientContext;
-use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, CommitMode, Rebalance, DefaultConsumerContext};
-use rdkafka::consumer::stream_consumer::StreamConsumer;
-use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
-use futures::*;
-
-use rdkafka::error::KafkaResult;
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
-
-use rdkafka::client::DefaultClientContext;
-use std::time::Duration;
-use std::{thread, env};
-
-use rdkafka::admin::ResourceSpecifier::Topic;
 use std::collections::HashMap;
-use rdkafka::TopicPartitionList;
-use rdkafka::topic_partition_list::Offset::Offset;
+use std::time::Duration;
+use std::{env, thread};
+
+use futures::*;
 use rdkafka::admin::TopicReplication::Fixed;
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
+use rdkafka::client::ClientContext;
+use rdkafka::client::DefaultClientContext;
+use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
+use rdkafka::consumer::stream_consumer::StreamConsumer;
+use rdkafka::consumer::{
+    BaseConsumer, CommitMode, Consumer, ConsumerContext, DefaultConsumerContext, Rebalance,
+};
+use rdkafka::message::Message;
+use rdkafka::topic_partition_list::Offset::Offset;
+use rdkafka::TopicPartitionList;
+
 use backoff::{ExponentialBackoff, Operation};
 
 fn create_config() -> ClientConfig {
@@ -32,7 +31,9 @@ fn create_config() -> ClientConfig {
 }
 
 fn create_admin_client() -> AdminClient<DefaultClientContext> {
-    create_config().create().expect("admin client creation failed")
+    create_config()
+        .create()
+        .expect("admin client creation failed")
 }
 
 pub fn get_broker_list() -> String {
@@ -59,13 +60,18 @@ pub struct PartitionDetailResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct MessagesResponse {
+    messages: Vec<MessageResponse>,
+    offsets: PartitionOffsets,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MessageResponse {
     json: String,
     offset: i64,
     partition: i32,
     timestamp: i64,
 }
-
 
 pub fn fetch_topic_detail(topic: Option<&str>) -> Result<Vec<TopicDetailResponse>, &'static str> {
     let timeout = Duration::from_secs(3);
@@ -75,8 +81,8 @@ pub fn fetch_topic_detail(topic: Option<&str>) -> Result<Vec<TopicDetailResponse
         .create()
         .map_err(|_| "Consumer creation failed")?;
 
-
-    let metadata = consumer.fetch_metadata(topic, timeout)
+    let metadata = consumer
+        .fetch_metadata(topic, timeout)
         .map_err(|_| "Failed to fetch metadata")?;
 
     let mut topics = vec![];
@@ -109,7 +115,6 @@ pub fn fetch_topic_detail(topic: Option<&str>) -> Result<Vec<TopicDetailResponse
     Ok(topics)
 }
 
-
 struct CustomContext;
 
 impl ClientContext for CustomContext {}
@@ -124,81 +129,107 @@ impl ConsumerContext for CustomContext {
     }
 }
 
-// A type alias with your custom consumer can be created for convenience.
-type LoggingConsumer = StreamConsumer<CustomContext>;
-//
-//pub fn consume(brokers: &str, group_id: &str, topic: &str, offsets: &PartitionOffsets) -> Result<Vec<MessageResponse>, &'static str> {
-//    let context = CustomContext;
-//    let mut tpl = TopicPartitionList::new();
-//
-//    offsets.iter().for_each(|(partition, offset)| {
-//        tpl.add_partition_offset(topic, *partition, Offset(*offset));
-//    });
-//
-//    eprintln!("topic = {:#?}", topic);
-//    eprintln!("offsets = {:#?}", offsets);
-//    let consumer: LoggingConsumer = ClientConfig::new()
-//        .set("group.id", group_id)
-//        .set("bootstrap.servers", brokers)
-//        .set("enable.partition.eof", "false")
-//        .set("session.timeout.ms", "6000")
-//        .set("enable.auto.commit", "true")
-//        //.set("statistics.interval.ms", "30000")
-//        //.set("auto.offset.reset", "smallest")
-//        .set_log_level(RDKafkaLogLevel::Debug)
-//        .create_with_context(context)
-//        .expect("Consumer creation failed");
-//
-//    eprintln!("tpl = {:#?}", tpl);
-//    consumer.assign(&tpl)
-//        .map_err(|_| "Can't subscribe to specified partitions")?;
-//
-//    // consumer.start() returns a stream. The stream can be used ot chain together expensive steps,
-//    // such as complex computations on a thread pool or asynchronous IO.
-//    let message_stream = consumer.start();
-//
-//    let mut messages = vec![];
-//
-//    for message in message_stream.wait() {
-//        eprintln!("messages = {:#?}", message);
-//        match message {
-//            Err(_) => eprintln!("Error while reading from stream."),
-//            Ok(Err(e)) => eprintln!("Kafka error: {}", e),
-//            Ok(Ok(m)) => {
-//                let payload = match m.payload_view::<str>() {
-//                    None => "",
-//                    Some(Ok(s)) => s,
-//                    Some(Err(e)) => {
-//                        eprintln!("Error while deserializing message payload: {:?}", e);
-//                        ""
-//                    }
-//                };
-//                eprintln!("key: '{:?}', payload: '{}', topic: {}, partition: {}, offset: {}, timestamp: {:?}",
-//                          m.key(), payload, m.topic(), m.partition(), m.offset(), m.timestamp());
-//                if let Some(headers) = m.headers() {
-//                    for i in 0..headers.count() {
-//                        let header = headers.get(i).unwrap();
-//                        eprintln!("  Header {:#?}: {:?}", header.0, header.1);
-//                    }
-//                }
-//                consumer.commit_message(&m, CommitMode::Async).unwrap();
-//
-//                messages.push(MessageResponse {
-//                    json: String::from(payload),
-//                    offset: m.offset(),
-//                    partition: m.partition(),
-//                    timestamp: m.timestamp().to_millis().ok_or("No timestamp for message")?,
-//                })
-//            }
-//        };
-//    }
-//
-//    Ok(messages)
-//}
-////
+type KafkaConsumer = StreamConsumer<CustomContext>;
+pub fn consume(
+    brokers: &str,
+    group_id: &str,
+    topic: &str,
+    offsets: &PartitionOffsets,
+) -> Result<MessagesResponse, &'static str> {
+    let topics_detail = fetch_topic_detail(Some(topic))?;
+    let topic_detail = topics_detail.first().expect("topic not found");
+
+    let mut limits: PartitionOffsets = HashMap::new();
+    let mut messages_received: PartitionOffsets = HashMap::new();
+
+    let context = CustomContext;
+    let mut tpl = TopicPartitionList::new();
+
+    offsets.iter().for_each(|(partition, offset)| {
+        let partition_detail: &PartitionDetailResponse = topic_detail
+            .partition_details
+            .get(*partition as usize)
+            .expect("partition not found");
+        let max = (partition_detail.highwatermark_offset - 1).min(*offset + 20);
+        let min = partition_detail.lowwatermark_offset.max(*offset);
+
+        if min >= max {
+            messages_received.insert(*partition, partition_detail.highwatermark_offset);
+            return;
+        }
+
+        limits.insert(*partition, max);
+        messages_received.insert(*partition, min);
+
+        tpl.add_partition_offset(topic, *partition, Offset(*offset));
+    });
+
+    let consumer: KafkaConsumer = ClientConfig::new()
+        .set("group.id", group_id)
+        .set("bootstrap.servers", brokers)
+        .set("enable.partition.eof", "false")
+        .set("session.timeout.ms", "6000")
+        .set("enable.auto.commit", "true")
+        .set_log_level(RDKafkaLogLevel::Debug)
+        .create_with_context(context)
+        .expect("Consumer creation failed");
+
+    consumer
+        .assign(&tpl)
+        .map_err(|_| "Can't subscribe to specified partitions")?;
+
+    let message_stream = consumer.start();
+    let mut messages = vec![];
+    for message in message_stream.wait() {
+        match message {
+            Err(_) => eprintln!("Error while reading from stream."),
+            Ok(Err(e)) => eprintln!("Kafka error: {}", e),
+            Ok(Ok(m)) => {
+                let payload = match m.payload_view::<str>() {
+                    None => "",
+                    Some(Ok(s)) => s,
+                    Some(Err(e)) => {
+                        eprintln!("Error while deserializing message payload: {:?}", e);
+                        "{\"error\": \"Can't deserialize message payload\" }"
+                    }
+                };
+                messages_received.insert(m.partition(), m.offset());
+                consumer.commit_message(&m, CommitMode::Async).unwrap();
+
+                let finished = limits.iter().all(|(k, v)| {
+                    let current_offset = messages_received.get(k).unwrap();
+
+                    v <= current_offset
+                });
+
+                if finished {
+                    consumer.stop();
+                }
+
+                messages.push(MessageResponse {
+                    json: String::from(payload),
+                    offset: m.offset(),
+                    partition: m.partition(),
+                    timestamp: m
+                        .timestamp()
+                        .to_millis()
+                        .ok_or("No timestamp for message")?,
+                })
+            }
+        };
+    }
+    println!("hello there");
+    eprintln!("messages_received = {:#?}", messages_received);
+
+    Ok(MessagesResponse {
+        messages,
+        offsets: messages_received,
+    })
+}
 
 fn verify_delete(topic: &str) {
-    let consumer: BaseConsumer<DefaultConsumerContext> = create_config().create().expect("consumer creation failed");
+    let consumer: BaseConsumer<DefaultConsumerContext> =
+        create_config().create().expect("consumer creation failed");
     let timeout = Some(Duration::from_secs(3));
 
     let mut backoff = ExponentialBackoff::default();
@@ -207,23 +238,23 @@ fn verify_delete(topic: &str) {
         // Asking about the topic specifically will recreate it (under the
         // default Kafka configuration, at least) so we have to ask for the list
         // of all topics and search through it.
-        let metadata = consumer.fetch_metadata(None, timeout).map_err(|e| e.to_string())?;
+        let metadata = consumer
+            .fetch_metadata(None, timeout)
+            .map_err(|e| e.to_string())?;
         if let Some(_) = metadata.topics().iter().find(|t| t.name() == topic) {
             Err(format!("topic {} still exists", topic))?
         }
         Ok(())
     })
-        .retry(&mut backoff)
-        .unwrap()
+    .retry(&mut backoff)
+    .unwrap()
 }
 
 pub fn delete_topic(topic: &str) -> Result<(), &'static str> {
     let admin_client = create_admin_client();
     let opts = AdminOptions::new().operation_timeout(Duration::from_secs(3));
 
-    eprintln!("topic = {:#?}", topic);
-
-    let res = admin_client
+    admin_client
         .delete_topics(&[topic], &opts)
         .wait()
         .map_err(|_| "topic deletion failed")?;
@@ -257,8 +288,7 @@ pub fn reset_topic(topic_name: &str) -> Result<(), &'static str> {
     let admin_client = create_admin_client();
     let opts = AdminOptions::new().operation_timeout(Duration::from_secs(3));
 
-
-    let res = admin_client
+    admin_client
         .delete_topics(&[topic_name], &opts)
         .wait()
         .map_err(|_| "topic deletion failed")?;

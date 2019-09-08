@@ -5,7 +5,7 @@ authors = ["Michel van der Hulst <michel@voorkanter.com>"]
 edition = "2018"
 
 [dependencies]
-rdkafka = { git = "https://github.com/benesch/rust-rdkafka", branch = "admin-client" }
+rdkafka = { git = "https://github.com/fede1024/rust-rdkafka", branch = "master" }
 futures = "0.1.21"
 libc = "0.2.0"
 log = "0.3.0"

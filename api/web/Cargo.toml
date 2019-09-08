@@ -10,9 +10,10 @@ kafka-admin = { path = "../kafka-admin" }
 bytes = "0.4"
 env_logger = "0.5"
 
-actix-rt = "0.2"
-actix-web = "1.0.0-beta.4"
-actix-files = "0.1.0-beta.4"
+actix-rt = "0.2.5"
+actix-web = "1.0.7"
+actix-files = "0.1.4"
+actix-cors = "0.1.0"
 
 futures = "0.1.25"
 

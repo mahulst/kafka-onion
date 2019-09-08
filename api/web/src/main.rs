@@ -4,19 +4,22 @@ extern crate serde_derive;
 #[macro_use]
 extern crate actix_web;
 
+use std::collections::HashMap;
 use std::{env, io};
-use kafka_admin::{fetch_topic_detail, delete_topic, reset_topic, create_topic, TopicDetailResponse, PartitionDetailResponse};
+
+use futures::Future;
+
+use actix_cors::Cors;
 use actix_files as fs;
 use actix_web::http::StatusCode;
-use actix_web::middleware::cors::Cors;
 use actix_web::web::Query;
 use actix_web::{error, guard, middleware, web, App, Error, HttpResponse, HttpServer, Result};
-use futures::Future;
+
+use kafka_admin::{consume, delete_topic, fetch_topic_detail, reset_topic};
 use read_topic_api::{
     fetch_from_topic_detail, fetch_latest_topic_detail, fetch_topics, get_client,
-    send_message_to_topic, PartitionOffsets,
+    send_message_to_topic,
 };
-use std::collections::HashMap;
 
 #[get("/favicon")]
 fn favicon() -> Result<fs::NamedFile> {
@@ -27,91 +30,95 @@ fn redirect_to_index() -> Result<fs::NamedFile> {
     Ok(fs::NamedFile::open("static/index.html")?.set_status_code(StatusCode::OK))
 }
 
-fn fetch_topics_handler() -> impl Future<Item=HttpResponse, Error=Error> {
+fn fetch_topics_handler() -> impl Future<Item = HttpResponse, Error = Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_topics(&mut client)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
-//
-//fn fetch_messages(
-//    topic_name: web::Path<String>,
-//    offsets: Query<Offsets>,
-//) -> impl Future<Item=HttpResponse, Error=Error> {
-//    web::block(move || {
-//        let mut client = get_client();
-//        let partitions: Vec<(i32, i64)> = offsets
-//            .offsets
-//            .split(',')
-//            .map(|el| {
-//                let els: Vec<&str> = el.split(';').collect();
-//                let partition = els.first().expect("No partition found in offsets");
-//                let offset = els.last().expect("No offset found in offsets");
-//
-//                return (
-//                    partition
-//                        .parse::<i32>()
-//                        .expect("Offsets should contain numbers"),
-//                    offset
-//                        .parse::<i64>()
-//                        .expect("Offsets should contain numbers"),
-//                );
-//            })
-//            .collect();
-//        let mut partition_offsets = HashMap::new();
-//        let partition_offsets: HashMap<i32, i64> =
-//            partitions
-//                .iter()
-//                .fold(partition_offsets, |mut acc, (partition, offset)| {
-//                    acc.insert(*partition, *offset);
-//                    acc
-//                });
-//
-//        consume("localhost:9092", "hello_123", "hello_world", &partition_offsets)
-//    })
-//        .then(|res| match res {
-//            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-//            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-//        })
-//}
+
+fn fetch_messages(
+    topic_name: web::Path<String>,
+    offsets: Query<Offsets>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || {
+        let partitions: Vec<(i32, i64)> = offsets
+            .offsets
+            .split(',')
+            .map(|el| {
+                let els: Vec<&str> = el.split(';').collect();
+                let partition = els.first().expect("No partition found in offsets");
+                let offset = els.last().expect("No offset found in offsets");
+
+                return (
+                    partition
+                        .parse::<i32>()
+                        .expect("Offsets should contain numbers"),
+                    offset
+                        .parse::<i64>()
+                        .expect("Offsets should contain numbers"),
+                );
+            })
+            .collect();
+
+        let partition_offsets: HashMap<i32, i64> =
+            partitions
+                .iter()
+                .fold(HashMap::new(), |mut acc, (partition, offset)| {
+                    acc.insert(*partition, *offset);
+                    acc
+                });
+
+        consume(
+            "localhost:9092",
+            "hello_123",
+            &topic_name,
+            &partition_offsets,
+        )
+    })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
+}
 
 fn delete_topic_handler(
     topic_name: web::Path<String>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
-    web::block(move || {
-        delete_topic(&topic_name)
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || delete_topic(&topic_name)).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
 }
 
 fn reset_topic_handler(
     topic_name: web::Path<String>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
-    web::block(move || {
-        reset_topic(&topic_name)
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || reset_topic(&topic_name)).then(|res| match res {
+        Ok(_) => Ok(HttpResponse::NoContent().finish()),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
     })
-        .then(|res| match res {
-            Ok(_) => Ok(HttpResponse::NoContent().finish()),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
 }
 
-fn fetch_topics_handler_v2() -> impl Future<Item=HttpResponse, Error=Error> {
-    web::block(move || {
-        fetch_topic_detail(None)
+fn fetch_topics_handler_v2() -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || fetch_topic_detail(None)).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+}
+
+fn fetch_topic_handler_v2(
+    topic_name: web::Path<String>,
+) -> impl Future<Item = HttpResponse, Error = Error> {
+    web::block(move || fetch_topic_detail(Some(&topic_name))).then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,7 +130,7 @@ struct SendMessageRequest {
 fn fetch_topic_detail_from_handler(
     topic_name: web::Path<String>,
     offsets: Query<Offsets>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
+) -> impl Future<Item = HttpResponse, Error = Error> {
     // TODO: can actix-web parse lists from query?
     let partitions: Vec<(i32, i64)> = offsets
         .offsets
@@ -143,11 +150,11 @@ fn fetch_topic_detail_from_handler(
             );
         })
         .collect();
-    let mut partition_offsets = HashMap::new();
+
     let partition_offsets: HashMap<i32, i64> =
         partitions
             .iter()
-            .fold(partition_offsets, |mut acc, (partition, offset)| {
+            .fold(HashMap::new(), |mut acc, (partition, offset)| {
                 acc.insert(*partition, *offset);
                 acc
             });
@@ -157,10 +164,10 @@ fn fetch_topic_detail_from_handler(
 
         fetch_from_topic_detail(&mut client, &topic_name, &partition_offsets)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 #[derive(Deserialize, Debug)]
@@ -170,35 +177,31 @@ struct Offsets {
 
 fn fetch_topic_detail_handler(
     name: web::Path<String>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
+) -> impl Future<Item = HttpResponse, Error = Error> {
     web::block(move || {
         let mut client = get_client();
 
         fetch_latest_topic_detail(&mut client, &name)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
+    .then(|res| match res {
+        Ok(topics) => Ok(HttpResponse::Ok().json(topics)),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 fn send_message_to_topic_handler(
     topic_name: web::Path<String>,
     item: web::Json<SendMessageRequest>,
-) -> impl Future<Item=HttpResponse, Error=Error> {
+) -> impl Future<Item = HttpResponse, Error = Error> {
     web::block(move || {
         let mut client = get_client();
 
         send_message_to_topic(&mut client, &topic_name, item.partition, &item.message)
     })
-        .then(|res| match res {
-            Ok(topics) => Ok(HttpResponse::Ok().finish()),
-            Err(_) => Ok(HttpResponse::InternalServerError().into()),
-        })
-}
-
-fn string_to_static_str(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
+    .then(|res| match res {
+        Ok(_) => Ok(HttpResponse::Ok().finish()),
+        Err(_) => Ok(HttpResponse::InternalServerError().into()),
+    })
 }
 
 fn main() -> io::Result<()> {
@@ -213,13 +216,16 @@ fn main() -> io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(middleware::Logger::default())
-            .wrap(
-                Cors::new()
-                    .allowed_methods(vec!["GET", "POST", "DELETE"]),
-            )
+            .wrap(Cors::new().allowed_methods(vec!["GET", "POST", "DELETE"]))
             .service(favicon)
             .service(web::resource("api/topics").route(web::get().to_async(fetch_topics_handler)))
-            .service(web::resource("api/v2/topics").route(web::get().to_async(fetch_topics_handler_v2)))
+            .service(
+                web::resource("api/v2/topics").route(web::get().to_async(fetch_topics_handler_v2)),
+            )
+            .service(
+                web::resource("api/v2/topic/{topic_name}")
+                    .route(web::get().to_async(fetch_topic_handler_v2)),
+            )
             .service(
                 web::resource("api/topic/{topic_name}")
                     .route(web::get().to_async(fetch_topic_detail_handler)),
@@ -236,22 +242,21 @@ fn main() -> io::Result<()> {
                 web::resource("api/topic/{topic_name}/from")
                     .route(web::get().to_async(fetch_topic_detail_from_handler)),
             )
-//            .service(
-//                web::resource("api/v2/topic/{topic_name}/messages")
-//                    .route(web::get().to_async(fetch_messages)),
-//            )
+            .service(
+                web::resource("api/v2/topic/{topic_name}/messages")
+                    .route(web::get().to_async(fetch_messages)),
+            )
             .service(
                 web::resource("api/topic/{topic_name}/sendMessage")
                     .data(
                         web::JsonConfig::default()
-                            .limit(10 * 1024 * 1024) // <- limit size of the payload
+                            .limit(10 * 1024 * 1024)
                             .error_handler(|err, _| {
-                                // <- create custom error response
                                 error::InternalError::from_response(
                                     err,
-                                    HttpResponse::Conflict().finish(),
+                                    HttpResponse::BadRequest().finish(),
                                 )
-                                    .into()
+                                .into()
                             }),
                     )
                     .route(web::post().to_async(send_message_to_topic_handler)),
@@ -269,8 +274,8 @@ fn main() -> io::Result<()> {
                     ),
             )
     })
-        .bind(&listen)?
-        .start();
+    .bind(&listen)?
+    .start();
 
     println!("Starting http server: {}", listen);
     sys.run()
